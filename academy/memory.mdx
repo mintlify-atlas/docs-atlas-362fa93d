@@ -1,0 +1,119 @@
+---
+title: "World memory fundamentals"
+description: "Understand what agent memory is, why stateful environments matter, and how the Worlds Platform implements persistent memory as an RDF knowledge graph."
+---
+
+Before writing a single line of code, it is worth understanding *why* agent memory is hard — and why most existing approaches fall short for complex, stateful AI systems.
+
+## The problem with retrieval-augmented generation
+
+Most AI applications today use **RAG (Retrieval-Augmented Generation)**. The pattern works like this:
+
+1. A user asks a question.
+2. The system converts the question into a vector embedding.
+3. It searches a vector store for semantically similar document chunks.
+4. Those chunks are stuffed into the LLM's context window.
+5. The LLM generates a response.
+
+This is effective for finding *similar* content, but it has fundamental limitations:
+
+- **No persistent state.** RAG is stateless — it retrieves snapshots, it does not maintain a live model of the world.
+- **No structured reasoning.** Vector similarity cannot answer questions like "Who manages Alice's team?" or "Which projects are both active and over budget?"
+- **No write path.** Classic RAG pipelines are read-only. The agent cannot update its understanding of the world.
+- **Hallucination under ambiguity.** When retrieved chunks are vague, the LLM fills in gaps with plausible-sounding but incorrect information.
+
+### Functional comparison
+
+| Feature            | Traditional RAG          | Worlds Platform                 |
+| :----------------- | :----------------------- | :------------------------------ |
+| **Data structure** | Flat text / embeddings   | Structured graph (RDF)          |
+| **Persistence**    | Session-based or static  | Truly persistent and stateful   |
+| **Reasoning**      | Vector similarity        | Symbolic logic (SPARQL)         |
+| **Interaction**    | Read-only retrieval      | Dynamic updates and tool-calling |
+| **Identity**       | Document chunks          | Named entities with URIs        |
+| **Relationships**  | Implicit (in text)       | Explicit (graph edges)          |
+
+## What is a World?
+
+A **World** is a stateful memory environment for an AI agent. Instead of storing flat text documents, a World organizes information as a **knowledge graph** — a network of entities connected by typed, named relationships.
+
+The term "World" is intentional. Just as humans understand their surroundings through relationships — identity, location, ownership, causality — an AI agent uses a World to maintain a consistent, structured understanding of its context. The World is the agent's model of reality.
+
+<Info>
+  Worlds uses **RDF (Resource Description Framework)** as its data model and **N-Quads** as its internal storage format. This makes it interoperable with the broader Semantic Web ecosystem, including standard SPARQL endpoints.
+</Info>
+
+## Memory types
+
+Worlds is designed around a complete memory stack that mirrors how human memory systems work. Each type serves a distinct function in an agent's cognitive architecture.
+
+| Memory type    | Agent perspective        | Worlds implementation                                  |
+| :------------- | :----------------------- | :----------------------------------------------------- |
+| **Semantic**   | What it **knows**        | **RDF store**: structured facts and relationships      |
+| **Episodic**   | What it **did**          | **Append-only log**: temporal history of events        |
+| **Working**    | What it is **thinking**  | **Context window**: live distillation of focus         |
+| **Procedural** | What it **can do**       | **Tools**: skills for graph and agent operations       |
+| **Sensory**    | What it **perceives**    | **Ingestion**: raw data streams and vector indexing    |
+
+### Semantic memory
+
+This is the primary focus of the Academy. Semantic memory stores *facts* — stable, structured knowledge about entities and their relationships. In Worlds, semantic memory is an RDF graph where every fact is a **triple**: a subject, a predicate, and an object.
+
+Example: `Earth orbits the Sun`. In RDF, this becomes:
+- Subject: `<http://example.org/solar-system/Earth>`
+- Predicate: `<http://example.org/solar-system/orbits>`
+- Object: `<http://example.org/solar-system/Sun>`
+
+### Episodic memory
+
+Episodic memory records *what happened and when*. Worlds provides an append-only log through the `listLogs` API, giving agents a temporal audit trail of all operations performed on a World.
+
+### Working memory
+
+Working memory is the agent's active context — what it is currently focused on. In an LLM-based agent, this maps directly to the context window. Worlds provides tools that pull the most relevant facts from the graph into working memory on demand.
+
+### Procedural memory
+
+Procedural memory is *how to do things*. In Worlds, this is implemented as tools exposed to the LLM via the `worlds-ai-sdk`. The agent does not need to know how SPARQL works internally — it knows it has a `executeSparql` tool and can use it.
+
+## Why symbolic memory matters
+
+Vector embeddings are excellent at capturing semantic *similarity*. But many agent tasks require something different: **exact retrieval** and **logical inference**.
+
+Consider these questions:
+
+- "Which planets orbit the Sun?" — Requires exact graph traversal, not similarity.
+- "What is the 4th planet from the Sun?" — Requires ordered enumeration over a numeric property.
+- "Does Alice know Bob?" — Requires a boolean answer from a specific relationship.
+
+A vector store will give you *approximately relevant* results. A knowledge graph gives you *precisely correct* answers.
+
+<Tip>
+  The real power of Worlds comes from combining both: use **vector search** (`worlds.search`) for fuzzy entity resolution and discovery, then use **SPARQL** (`worlds.sparql`) for precise retrieval and reasoning. These two modes complement each other.
+</Tip>
+
+## The Worlds memory lifecycle
+
+<Steps>
+  <Step title="Ingest">
+    Data enters a World through the `import` API. You can import RDF data in Turtle, N-Triples, N3, or N-Quads format. The platform indexes both the graph structure (for SPARQL) and vector embeddings (for semantic search).
+  </Step>
+
+  <Step title="Query">
+    Agents read from the World using SPARQL queries (exact retrieval) or semantic search (fuzzy retrieval). The `worlds-ai-sdk` provides pre-built tools for both patterns.
+  </Step>
+
+  <Step title="Update">
+    Agents write new facts using SPARQL UPDATE statements (`INSERT DATA`, `DELETE DATA`). Each write is validated and logged, maintaining a complete audit trail.
+  </Step>
+
+  <Step title="Reason">
+    The LLM receives structured data from the graph and generates responses grounded in explicit facts rather than approximate document retrieval.
+  </Step>
+</Steps>
+
+## Next: how the graph is structured
+
+Now that you understand *why* Worlds uses a graph model, the next module explains *how* that graph is structured — the RDF triple model, URI-based identity, and the Turtle serialization format.
+
+[Continue to symbolic graph architecture](/academy/graphs)

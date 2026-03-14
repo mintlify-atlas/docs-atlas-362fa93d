@@ -1,0 +1,252 @@
+---
+title: "Data integration"
+description: "Import, export, and synchronize RDF data in Turtle, N-Quads, N-Triples, and N3 formats."
+---
+
+Worlds supports multiple strategies for ingesting data into isolated world memory, ranging from one-time bulk imports to real-time triple insertion.
+
+## Supported RDF formats
+
+| Format | Content-Type | SDK format value |
+| :--- | :--- | :--- |
+| Turtle | `text/turtle` | `"turtle"` |
+| N-Quads | `application/n-quads` | `"n-quads"` |
+| N-Triples | `application/n-triples` | `"n-triples"` |
+| N3 | `text/n3` | `"n3"` |
+
+N-Quads is the internal storage format. All other formats are converted to N-Quads on import.
+
+## Importing data
+
+### Using the SDK
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+// Import a Turtle file
+const turtleData = await Deno.readTextFile("./data.ttl");
+await sdk.worlds.import("my-world", turtleData, { format: "turtle" });
+
+// Import N-Quads
+const nquadsData = await Deno.readTextFile("./data.nq");
+await sdk.worlds.import("my-world", nquadsData, { format: "n-quads" });
+```
+
+### Using the REST API directly
+
+```bash
+curl -X POST http://localhost:8000/worlds/my-world/import \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: text/turtle" \
+  --data-binary @./data.ttl
+```
+
+A successful import returns `204 No Content`.
+
+## Importing in different formats
+
+<Tabs>
+  <Tab title="Turtle">
+    ```typescript
+    const turtle = `
+      @prefix schema: <http://schema.org/> .
+      @prefix ex: <http://example.com/> .
+
+      ex:ethan a schema:Person ;
+          schema:givenName "Ethan" ;
+          schema:worksFor ex:acme .
+
+      ex:acme a schema:Organization ;
+          schema:name "Acme Corp" .
+    `;
+
+    await sdk.worlds.import("my-world", turtle, { format: "turtle" });
+    ```
+  </Tab>
+  <Tab title="N-Quads">
+    ```typescript
+    const nquads = `
+      <http://example.com/ethan> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://schema.org/Person> .
+      <http://example.com/ethan> <http://schema.org/givenName> "Ethan" .
+      <http://example.com/ethan> <http://schema.org/worksFor> <http://example.com/acme> .
+    `;
+
+    await sdk.worlds.import("my-world", nquads, { format: "n-quads" });
+    ```
+  </Tab>
+  <Tab title="N-Triples">
+    ```typescript
+    const ntriples = `
+      <http://example.com/ethan> <http://schema.org/givenName> "Ethan" .
+      <http://example.com/acme> <http://schema.org/name> "Acme Corp" .
+    `;
+
+    await sdk.worlds.import("my-world", ntriples, { format: "n-triples" });
+    ```
+  </Tab>
+  <Tab title="N3">
+    ```typescript
+    const n3 = `
+      @prefix schema: <http://schema.org/> .
+      @prefix ex: <http://example.com/> .
+
+      { ex:ethan schema:worksFor ex:acme } => { ex:ethan schema:knows ex:acme } .
+    `;
+
+    await sdk.worlds.import("my-world", n3, { format: "n3" });
+    ```
+  </Tab>
+</Tabs>
+
+## Exporting data
+
+Export a world's full graph in any supported RDF format:
+
+```typescript
+// Export as Turtle
+const buffer = await sdk.worlds.export("my-world", { format: "turtle" });
+const text = new TextDecoder().decode(buffer);
+console.log(text);
+
+// Save to file
+await Deno.writeFile("./backup.ttl", new Uint8Array(buffer));
+```
+
+```bash
+# Export via REST API
+curl http://localhost:8000/worlds/my-world/export?format=turtle \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -o backup.ttl
+```
+
+## Bulk ingestion patterns
+
+For large datasets, ingest data in batches to avoid timeout issues:
+
+```typescript
+async function bulkImport(
+  worldId: string,
+  triples: { subject: string; predicate: string; object: string }[]
+) {
+  const BATCH_SIZE = 1000;
+
+  for (let i = 0; i < triples.length; i += BATCH_SIZE) {
+    const batch = triples.slice(i, i + BATCH_SIZE);
+
+    // Build N-Triples for this batch
+    const ntriples = batch
+      .map(({ subject, predicate, object }) =>
+        `<${subject}> <${predicate}> <${object}> .`
+      )
+      .join("\n");
+
+    await sdk.worlds.import(worldId, ntriples, { format: "n-triples" });
+    console.log(`Imported ${i + batch.length} / ${triples.length} triples`);
+  }
+}
+```
+
+## Transforming JSON to RDF
+
+Convert structured data from APIs or databases into RDF triples before import:
+
+```typescript
+interface PersonRecord {
+  id: string;
+  name: string;
+  email: string;
+  company: string;
+}
+
+function jsonToTurtle(records: PersonRecord[]): string {
+  const lines = [
+    "@prefix schema: <http://schema.org/> .",
+    "@prefix ex: <http://example.com/> .",
+    "",
+  ];
+
+  for (const record of records) {
+    const iri = `ex:${record.id}`;
+    lines.push(`${iri} a schema:Person ;`);
+    lines.push(`    schema:name "${record.name}" ;`);
+    lines.push(`    schema:email "${record.email}" ;`);
+    lines.push(`    schema:worksFor ex:${record.company} .`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+const people: PersonRecord[] = [
+  { id: "alice", name: "Alice", email: "alice@example.com", company: "acme" },
+  { id: "bob", name: "Bob", email: "bob@example.com", company: "acme" },
+];
+
+const turtle = jsonToTurtle(people);
+await sdk.worlds.import("my-world", turtle, { format: "turtle" });
+```
+
+## Data synchronization
+
+To keep a world in sync with an external source, combine SPARQL updates with scheduled imports:
+
+<Steps>
+  <Step title="Detect changes in the source system">
+    Track a `lastSyncAt` timestamp to identify records created or modified since the last sync.
+  </Step>
+
+  <Step title="Translate changes to RDF patch operations">
+    For each changed record, generate SPARQL INSERT or DELETE statements that reflect the diff.
+
+    ```typescript
+    async function syncPerson(worldId: string, person: PersonRecord) {
+      // Remove old facts
+      await sdk.worlds.sparql(worldId, `
+        PREFIX schema: <http://schema.org/>
+        PREFIX ex: <http://example.com/>
+
+        DELETE WHERE {
+          ex:${person.id} schema:name ?name .
+          ex:${person.id} schema:email ?email .
+        }
+      `);
+
+      // Insert updated facts
+      await sdk.worlds.sparql(worldId, `
+        PREFIX schema: <http://schema.org/>
+        PREFIX ex: <http://example.com/>
+
+        INSERT DATA {
+          ex:${person.id} a schema:Person ;
+              schema:name "${person.name}" ;
+              schema:email "${person.email}" .
+        }
+      `);
+    }
+    ```
+  </Step>
+
+  <Step title="Verify the sync">
+    After syncing, run a SPARQL query to confirm the expected triples are present.
+  </Step>
+</Steps>
+
+<Tip>
+Always use deterministic IRIs for entities you plan to update. Avoid blank nodes for any entity that may be modified later — the server skolemizes blank nodes automatically, but the generated IRIs are not predictable across import operations.
+</Tip>
+
+## What happens on import
+
+When you call `sdk.worlds.import()`, the server:
+
+1. Parses the RDF payload and converts it to N-Quads.
+2. Skolemizes blank nodes to deterministic IRIs.
+3. Upserts each triple into the `triples` table in the world's database.
+4. Chunks and embeds literal values for hybrid semantic search.
+5. Synchronizes `rdf:type` relations to the `entity_types` table for type filtering.
+6. Appends a log entry recording the number of triples imported.

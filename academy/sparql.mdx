@@ -1,0 +1,308 @@
+---
+title: "Logical reasoning with SPARQL"
+description: "Master SPARQL 1.1 — the W3C standard query language for RDF graphs. Learn SELECT, INSERT, DELETE, ASK, and CONSTRUCT queries with real Worlds Platform examples."
+---
+
+You have built a graph of triples. Now you need to read from it, write to it, and reason over it. You do this with **SPARQL** (SPARQL Protocol and RDF Query Language) — the W3C standard query language for RDF data.
+
+## What is SPARQL?
+
+SPARQL is to RDF graphs what SQL is to relational databases — but instead of querying rows and columns, you query *patterns* of triples. SPARQL operates by matching graph patterns against your data and returning the bindings that satisfy those patterns.
+
+SPARQL 1.1 supports four query forms and a separate update language:
+
+| Form          | Purpose                                           |
+| :------------ | :------------------------------------------------ |
+| `SELECT`      | Return variable bindings (like SQL SELECT)        |
+| `ASK`         | Return a boolean: does this pattern exist?        |
+| `CONSTRUCT`   | Return a new RDF graph built from results         |
+| `DESCRIBE`    | Return all triples about a resource               |
+| `INSERT DATA` | Add triples to the graph                          |
+| `DELETE DATA` | Remove triples from the graph                     |
+
+## SELECT queries
+
+The most common SPARQL operation. Variables start with `?`. The `WHERE` clause defines the pattern to match.
+
+### Basic pattern matching
+
+Using the solar system dataset from the previous module:
+
+```sparql
+SELECT ?planet ?label WHERE {
+  ?planet a <http://example.org/solar-system/Planet> .
+  ?planet <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+}
+```
+
+This matches every entity typed as `ex:Planet` and retrieves its `rdfs:label`. The `?planet` variable binds to each planet URI; `?label` binds to the label string.
+
+### Following relationships
+
+SPARQL can traverse multiple hops in a single query. This is where knowledge graphs outperform vector search:
+
+```sparql
+SELECT ?name WHERE {
+  <http://example.com/ethan> <http://schema.org/relatedTo> ?person .
+  ?person <http://schema.org/givenName> ?name .
+}
+```
+
+Breakdown:
+1. Start at the entity `ethan`.
+2. Follow the `schema:relatedTo` edge to find `?person`.
+3. From `?person`, retrieve the `schema:givenName`.
+
+Vector search cannot express this pattern. SPARQL follows the explicit edges in the graph and returns only exact matches.
+
+### Filtering results
+
+Use `FILTER` to add conditions on variable values:
+
+```sparql
+SELECT ?planet ?order WHERE {
+  ?planet a <http://example.org/solar-system/Planet> .
+  ?planet <http://example.org/solar-system/order> ?order .
+  FILTER (?order <= 4)
+}
+ORDER BY ?order
+```
+
+This returns only the four innermost planets, ordered by their position.
+
+### OPTIONAL clauses
+
+Use `OPTIONAL` to retrieve data that may not be present for all subjects — analogous to a LEFT JOIN:
+
+```sparql
+SELECT ?person ?name ?age WHERE {
+  ?person a <http://schema.org/Person> .
+  ?person <http://schema.org/givenName> ?name .
+  OPTIONAL { ?person <http://schema.org/age> ?age . }
+}
+```
+
+Persons without an `age` triple will still be returned, with `?age` unbound.
+
+## INSERT and DELETE
+
+SPARQL Update operations modify the graph. They use the same triple pattern syntax but are prefixed with `INSERT DATA` or `DELETE DATA`.
+
+### Adding facts
+
+```sparql
+INSERT DATA {
+  <http://example.com/alice> a <http://schema.org/Person> ;
+    <http://schema.org/givenName> "Alice" ;
+    <http://schema.org/age> 30 .
+}
+```
+
+This adds three triples in a single operation. The entity `alice` now exists in the graph with a type, a name, and an age.
+
+### Removing facts
+
+```sparql
+DELETE DATA {
+  <http://example.com/alice> <http://schema.org/age> 30 .
+}
+```
+
+This removes exactly the triple matching `alice`'s age. Other triples about Alice are unaffected.
+
+### Conditional updates (DELETE/INSERT WHERE)
+
+For updates that depend on existing data, combine DELETE and INSERT with a WHERE clause:
+
+```sparql
+DELETE {
+  <http://example.com/alice> <http://schema.org/age> ?oldAge .
+}
+INSERT {
+  <http://example.com/alice> <http://schema.org/age> 31 .
+}
+WHERE {
+  <http://example.com/alice> <http://schema.org/age> ?oldAge .
+}
+```
+
+This atomically replaces Alice's age, regardless of what the current value is.
+
+## ASK queries
+
+`ASK` returns a simple `true` or `false`. It is useful when you want to check whether a relationship exists before acting on it:
+
+```sparql
+ASK {
+  <http://example.com/alice> <http://schema.org/knows> <http://example.com/bob> .
+}
+```
+
+Returns `true` if Alice knows Bob in the graph; `false` otherwise. Agents can use this to avoid duplicate writes.
+
+## CONSTRUCT queries
+
+`CONSTRUCT` returns a new RDF graph synthesized from query results. This is useful for transforming or summarizing graph data:
+
+```sparql
+CONSTRUCT {
+  ?person <http://schema.org/name> ?fullName .
+} WHERE {
+  ?person <http://schema.org/givenName> ?given ;
+          <http://schema.org/familyName> ?family .
+  BIND(CONCAT(?given, " ", ?family) AS ?fullName)
+}
+```
+
+This constructs a new graph where each person has a computed `schema:name` value derived by concatenating their given and family names — a field that was never explicitly stored.
+
+## Graph traversal patterns
+
+SPARQL 1.1 supports **property paths** — a way to traverse the graph across an arbitrary number of hops using regex-like syntax.
+
+| Syntax       | Meaning                                              |
+| :----------- | :--------------------------------------------------- |
+| `pred`       | Exactly one hop via `pred`                           |
+| `pred+`      | One or more hops via `pred`                          |
+| `pred*`      | Zero or more hops via `pred`                         |
+| `pred?`      | Zero or one hop via `pred`                           |
+| `pred1/pred2`| Sequence: one hop via `pred1`, then one via `pred2`  |
+| `pred1\|pred2` | Alternative: match either `pred1` or `pred2`       |
+
+Example — find all bodies that orbit the Sun directly or indirectly:
+
+```sparql
+SELECT ?body WHERE {
+  ?body <http://example.org/solar-system/orbits>+ <http://example.org/solar-system/Sun> .
+}
+```
+
+## SPARQL vs. vector search
+
+<Note>
+  Vector search and SPARQL are complementary, not competing, in the Worlds Platform. Use both for optimal results.
+</Note>
+
+| Question type                    | Best approach  | Reason                                             |
+| :------------------------------- | :------------- | :------------------------------------------------- |
+| "What does Alice do?"            | Vector search  | Fuzzy, semantic — good for discovery               |
+| "Who manages Alice?"             | SPARQL         | Follows an explicit `hasManager` edge              |
+| "Find the 5th planet from Sun"   | SPARQL         | Filters on an exact numeric property               |
+| "Find teams working on AI"       | Vector search  | Semantic similarity across project descriptions   |
+| "Is Alice on the infra team?"    | SPARQL (`ASK`) | Boolean membership check                          |
+| "List Alice's direct reports"    | SPARQL         | Graph traversal across `directReport` edges        |
+
+## Executing SPARQL with the Worlds SDK
+
+The `Worlds` SDK class exposes a `sparql` method that sends any SPARQL query or update to the API endpoint, conforming to the [SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/):
+
+```typescript
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+// SELECT query — returns SPARQL JSON results
+const results = await sdk.worlds.sparql(
+  "my-world-id",
+  `SELECT ?label WHERE {
+    ?planet a <http://example.org/solar-system/Planet> .
+    ?planet <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+  } ORDER BY ?label`,
+);
+
+console.log(results);
+// {
+//   results: {
+//     bindings: [
+//       { label: { type: "literal", value: "Earth" } },
+//       { label: { type: "literal", value: "Jupiter" } },
+//       ...
+//     ]
+//   }
+// }
+```
+
+### UPDATE operations
+
+For `INSERT DATA` and `DELETE DATA`, the response is `null` (HTTP 204 No Content) on success:
+
+```typescript
+// Returns null on success
+await sdk.worlds.sparql(
+  "my-world-id",
+  `INSERT DATA {
+    <http://example.com/alice> a <http://schema.org/Person> ;
+      <http://schema.org/givenName> "Alice" .
+  }`,
+);
+```
+
+### Named graphs
+
+You can scope queries to specific named graphs using the optional parameters:
+
+```typescript
+await sdk.worlds.sparql(
+  "my-world-id",
+  `SELECT ?s ?p ?o WHERE { ?s ?p ?o }`,
+  {
+    defaultGraphUris: ["http://example.org/my-named-graph"],
+  },
+);
+```
+
+## Practice
+
+You can run SPARQL queries interactively in the [Worlds Console](https://console.wazoo.dev) or via the [CLI](/reference/cli). Import the solar system Turtle file from the previous module and try the following exercises:
+
+<AccordionGroup>
+  <Accordion title="Exercise 1: List all planets by orbital order">
+    ```sparql
+    SELECT ?label ?order WHERE {
+      ?planet a <http://example.org/solar-system/Planet> .
+      ?planet <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+      ?planet <http://example.org/solar-system/order> ?order .
+    } ORDER BY ?order
+    ```
+  </Accordion>
+
+  <Accordion title="Exercise 2: Find the 3rd planet">
+    ```sparql
+    SELECT ?label WHERE {
+      ?planet a <http://example.org/solar-system/Planet> .
+      ?planet <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+      ?planet <http://example.org/solar-system/order> 3 .
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Exercise 3: Add Pluto to the graph">
+    ```sparql
+    INSERT DATA {
+      <http://example.org/solar-system/Pluto> a <http://example.org/solar-system/DwarfPlanet> ;
+        <http://www.w3.org/2000/01/rdf-schema#label> "Pluto" ;
+        <http://schema.org/description> "A dwarf planet in the Kuiper belt." ;
+        <http://example.org/solar-system/orbits> <http://example.org/solar-system/Sun> .
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Exercise 4: Ask whether Earth orbits the Sun">
+    ```sparql
+    ASK {
+      <http://example.org/solar-system/Earth>
+        <http://example.org/solar-system/orbits>
+        <http://example.org/solar-system/Sun> .
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next: connecting an agent
+
+You can now build and query knowledge graphs. The final module brings it all together: connecting an LLM to a World using the `worlds-ai-sdk` so it can query and update its memory through tool-calling.
+
+[Continue to neuro-symbolic agent integration](/academy/agents)

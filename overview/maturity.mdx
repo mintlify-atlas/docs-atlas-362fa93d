@@ -1,0 +1,53 @@
+---
+title: "Maturity matrix"
+description: "Current stability and production-readiness of the Worlds Platform's core features."
+---
+
+The following matrix provides transparency into the current state and stability of the platform's core features. Use it to evaluate whether a feature is suitable for your deployment.
+
+## Feature matrix
+
+| Category | Feature | Status | Description |
+| :--- | :--- | :--- | :--- |
+| **Core Storage** | libSQL / SQLite | **Stable** | Performant, reliable storage for triples and chunks. |
+| **Search** | Hybrid vector and FTS | **Stable** | High-fidelity RRF retrieval. |
+| **Querying** | SPARQL 1.1 | **Beta** | Full query/update support; optimization ongoing. |
+| **SDK** | worlds-sdk | **Stable** | Mature, typed interface for core operations. |
+| **Integrations** | MCP Support | **Beta** | Tool-based integration for Claude and Gemini. |
+| **Enterprise** | RBAC / AuthKit | **Alpha** | Role-based access control and advanced auth. |
+| **Infrastructure** | Edge Deployment | **Beta** | Optimized for Deno Deploy and distributed Edge. |
+
+## Release stages
+
+<AccordionGroup>
+  <Accordion title="Stable">
+    Production-ready. The API is locked and breaking changes are minimized. Stable features are safe to rely on in production applications.
+  </Accordion>
+  <Accordion title="Beta">
+    Feature-complete but may contain performance bottlenecks or minor bugs. The API surface is unlikely to change significantly, but may see refinements before a stable release.
+  </Accordion>
+  <Accordion title="Alpha">
+    Experimental. The API and architecture are subject to frequent, significant changes. Alpha features are not recommended for production use.
+  </Accordion>
+</AccordionGroup>
+
+<Warning>
+  Alpha features may introduce breaking changes without a major version bump. If you use Alpha features, pin your SDK version and monitor the [changelog](/reference/changelog).
+</Warning>
+
+## What is production-ready
+
+For production applications today, the following combination is stable and recommended:
+
+- **Storage**: libSQL / SQLite for persistence.
+- **SDK**: `@wazoo/worlds-sdk` for all API interactions.
+- **Search**: Hybrid vector + FTS search via `sdk.worlds.search()`.
+- **Deployment**: Self-hosted with local SQLite, or Turso for managed storage.
+
+## What is experimental
+
+The following capabilities are under active development and not recommended for production:
+
+- **RBAC / AuthKit**: Role-based access control is in Alpha. Use the single `WORLDS_API_KEY` for authentication in production for now.
+- **Edge deployment**: While functional, edge deployment optimizations are ongoing. Test thoroughly before deploying at scale.
+- **MCP integration**: The MCP server integration is Beta. Expect API refinements.

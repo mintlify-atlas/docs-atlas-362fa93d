@@ -1,0 +1,245 @@
+---
+title: "Symbolic graph architecture"
+description: "Learn the RDF data model — triples, URIs, literals, and the Turtle serialization format — through real examples from the Worlds Platform."
+---
+
+In the previous module you learned that a World is a knowledge graph. This module explains exactly how that graph is constructed — starting from the smallest possible unit of knowledge.
+
+## The triple: atomic unit of knowledge
+
+Every piece of information in a World is stored as a **triple**. A triple consists of exactly three components:
+
+| Component     | Role                                          | Example                                    |
+| :------------ | :-------------------------------------------- | :----------------------------------------- |
+| **Subject**   | The entity being described                    | `<http://example.org/solar-system/Earth>`  |
+| **Predicate** | The relationship or property                  | `<http://example.org/solar-system/orbits>` |
+| **Object**    | The value or entity being related to         | `<http://example.org/solar-system/Sun>`    |
+
+Together, they form a single semantic statement: **Earth orbits the Sun.**
+
+This three-part structure — called a **triple** or **statement** — is the foundation of RDF (Resource Description Framework), the W3C standard that Worlds is built on.
+
+## Why triples?
+
+Triples are powerful because they are universal. Any fact about any entity in any domain can be expressed as a triple. As you add more triples, they naturally form a **graph** — nodes (entities) connected by labeled edges (predicates).
+
+Consider these three statements:
+
+```
+Earth  orbits    Sun
+Mars   orbits    Sun
+Earth  hasOrder  3
+```
+
+Even from three triples, an agent can reason: "Earth and Mars both orbit the Sun. Earth is the 3rd planet in its system." The graph encodes not just data, but *relationships* between data.
+
+## URIs: stable identity
+
+In RDF, subjects and predicates are identified by **URIs (Uniform Resource Identifiers)**. This is critical: it means that `<http://example.org/Earth>` always refers to the same planet, regardless of which dataset, system, or language it appears in.
+
+This is fundamentally different from a relational database, where an entity is identified by a row ID that is meaningful only within one table. RDF entity identity is global and stable.
+
+<Info>
+  Worlds uses **IRIs (Internationalized Resource Identifiers)** — the Unicode superset of URIs. When the `worlds-ai-sdk` needs to create a new entity, it uses the `generateIri` tool to mint a unique IRI at `https://wazoo.dev/.well-known/genid/{ulid}`, ensuring globally unique, collision-free identity.
+</Info>
+
+### URIs vs. literals
+
+Objects in a triple can be either a **URI** (pointing to another entity) or a **literal** (a raw value).
+
+| Object type | Syntax example                   | Used for                       |
+| :---------- | :------------------------------- | :----------------------------- |
+| URI         | `<http://example.org/Sun>`       | Links to another entity        |
+| Plain literal | `"The Sun"`                    | String values                  |
+| Typed literal | `"3"^^xsd:integer`             | Numbers, dates, booleans       |
+| Language literal | `"Sonne"@de`              | Strings with language tags     |
+
+## The Turtle format
+
+**Turtle** (Terse RDF Triple Language) is the most human-readable way to write RDF. It uses prefixes to abbreviate URIs and allows multiple predicates for the same subject to be grouped together.
+
+### Prefixes
+
+Turtle files start with prefix declarations that create short aliases for long URI namespaces:
+
+```turtle
+@prefix ex: <http://example.org/solar-system/> .
+@prefix schema: <http://schema.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+```
+
+With these prefixes, `ex:Earth` is shorthand for `<http://example.org/solar-system/Earth>`.
+
+### Writing triples
+
+Each triple ends with a period. Multiple predicates for the same subject are separated by semicolons:
+
+```turtle
+@prefix ex: <http://example.org/solar-system/> .
+@prefix schema: <http://schema.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# A single triple
+ex:Sun a schema:Star .
+
+# Multiple predicates for the same subject (semicolon syntax)
+ex:Earth a ex:Planet ;
+    rdfs:label "Earth" ;
+    schema:description "The third planet from the Sun." ;
+    ex:order 3 ;
+    ex:orbits ex:Sun .
+```
+
+<Note>
+  The `a` keyword is shorthand for `rdf:type`. Writing `ex:Earth a ex:Planet` is identical to `ex:Earth <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ex:Planet`.
+</Note>
+
+## Real example: the solar system dataset
+
+The Worlds CLI includes a complete solar system dataset in Turtle format. This is used in tutorials and examples throughout the platform. Here is the full file:
+
+```turtle
+@prefix ex: <http://example.org/solar-system/> .
+@prefix schema: <http://schema.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ex:Sun a schema:Star ;
+    rdfs:label "Sun" ;
+    schema:description "The star at the center of the Solar System." .
+
+ex:Mercury a ex:Planet ;
+    rdfs:label "Mercury" ;
+    schema:description "The smallest and innermost planet in the Solar System." ;
+    ex:order 1 ;
+    ex:orbits ex:Sun .
+
+ex:Venus a ex:Planet ;
+    rdfs:label "Venus" ;
+    schema:description "The second planet from the Sun and the hottest planet in our solar system." ;
+    ex:order 2 ;
+    ex:orbits ex:Sun .
+
+ex:Earth a ex:Planet ;
+    rdfs:label "Earth" ;
+    schema:description "The third planet from the Sun and the only astronomical object known to harbor life." ;
+    ex:order 3 ;
+    ex:orbits ex:Sun .
+
+ex:Mars a ex:Planet ;
+    rdfs:label "Mars" ;
+    schema:description "The fourth planet from the Sun and the second-smallest planet in the Solar System." ;
+    ex:order 4 ;
+    ex:orbits ex:Sun .
+
+ex:Jupiter a ex:Planet ;
+    rdfs:label "Jupiter" ;
+    schema:description "The fifth planet from the Sun and the largest in the Solar System." ;
+    ex:order 5 ;
+    ex:orbits ex:Sun .
+
+ex:Saturn a ex:Planet ;
+    rdfs:label "Saturn" ;
+    schema:description "The sixth planet from the Sun and the second-largest in the Solar System." ;
+    ex:order 6 ;
+    ex:orbits ex:Sun .
+
+ex:Uranus a ex:Planet ;
+    rdfs:label "Uranus" ;
+    schema:description "The seventh planet from the Sun and has the third-largest planetary radius." ;
+    ex:order 7 ;
+    ex:orbits ex:Sun .
+
+ex:Neptune a ex:Planet ;
+    rdfs:label "Neptune" ;
+    schema:description "The eighth and farthest-known Solar planet from the Sun." ;
+    ex:order 8 ;
+    ex:orbits ex:Sun .
+```
+
+This file defines 9 entities (1 star, 8 planets), each with a type, a label, a description, an orbital order, and a relationship to the Sun. Every fact is explicit, structured, and queryable.
+
+## Graph design patterns
+
+Well-designed RDF graphs follow consistent patterns that make them easy to query and extend.
+
+<AccordionGroup>
+  <Accordion title="Use established vocabularies">
+    Re-use standard vocabularies like `schema.org`, `rdfs`, and `foaf` rather than inventing predicates. This makes your graph interoperable with other datasets and tools.
+
+    ```turtle
+    # Good: uses schema.org
+    ex:Alice a schema:Person ;
+        schema:givenName "Alice" ;
+        schema:jobTitle "Engineer" .
+
+    # Avoid: invents non-standard predicates
+    ex:Alice ex:type ex:Person ;
+        ex:firstName "Alice" ;
+        ex:job "Engineer" .
+    ```
+  </Accordion>
+
+  <Accordion title="Give every entity a stable URI">
+    Do not use blank nodes for entities that need to be referenced from elsewhere in the graph. Assign a stable URI so the entity can be the subject or object of other triples.
+
+    ```turtle
+    # Good: named entity with stable URI
+    <https://wazoo.dev/.well-known/genid/01HV3K8Q2P5X9Y7Z0W4NBEJDCF> a schema:Person ;
+        schema:givenName "Alice" .
+
+    # Risky: blank node cannot be reliably referenced later
+    _:alice a schema:Person ;
+        schema:givenName "Alice" .
+    ```
+  </Accordion>
+
+  <Accordion title="Model relationships explicitly">
+    Named relationships between entities are the primary value of a knowledge graph. An agent can traverse them with a single SPARQL pattern — something impossible with flat text.
+
+    ```turtle
+    ex:Alice schema:worksFor ex:AcmeCorp .
+    ex:AcmeCorp schema:location ex:Seattle .
+    ex:Bob schema:worksFor ex:AcmeCorp .
+    ```
+
+    From these three triples, an agent can infer: Alice and Bob share a work location in Seattle — without that fact being explicitly stated.
+  </Accordion>
+
+  <Accordion title="Use typed literals for structured values">
+    Attach XSD types to numeric, date, and boolean literals so SPARQL can filter and compare them correctly.
+
+    ```turtle
+    ex:Earth ex:order "3"^^xsd:integer .
+    ex:Mission ex:launchDate "1969-07-16"^^xsd:date .
+    ex:Station ex:isOperational "true"^^xsd:boolean .
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Importing a Turtle file into a World
+
+Once you have written a Turtle file, you can import it into a World using the SDK:
+
+```typescript
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+import { readFile } from "node:fs/promises";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+const turtle = await readFile("solar_system.ttl", "utf-8");
+
+await sdk.worlds.import("my-world-id", turtle, { format: "turtle" });
+```
+
+The SDK also supports `n-triples`, `n3`, and `n-quads` (the default internal format).
+
+## Next: querying the graph
+
+You now understand how knowledge is structured in a World. The next module teaches you how to query that structure with SPARQL — retrieving exact facts and following relationships across the graph.
+
+[Continue to logical reasoning with SPARQL](/academy/sparql)

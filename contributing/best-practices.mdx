@@ -1,0 +1,268 @@
+---
+title: "Best practices"
+description: "TypeScript, RDF/SPARQL, testing, and error handling patterns for the Worlds Platform codebase."
+---
+
+This page documents the patterns and conventions established across the Worlds Platform codebase. Following them keeps contributions consistent and reduces review friction.
+
+## TypeScript
+
+### Strict typing
+
+Avoid `any`. Use explicit types for function parameters and return values, especially at module boundaries:
+
+```typescript
+// Prefer
+function buildQuery(worldId: string, sparql: string): Request {
+  // ...
+}
+
+// Avoid
+function buildQuery(worldId: any, sparql: any): any {
+  // ...
+}
+```
+
+### Zod for runtime validation
+
+All external inputs — HTTP request bodies, environment variables, and file-based config — must be validated at runtime with [Zod](https://zod.dev). Define schemas in a co-located `schema.ts` file:
+
+```typescript
+import { z } from "zod";
+
+export const CreateWorldSchema = z.object({
+  label: z.string().min(1).max(255),
+  description: z.string().optional(),
+});
+
+export type CreateWorldInput = z.infer<typeof CreateWorldSchema>;
+```
+
+Parse inputs at the route handler boundary before passing them to services:
+
+```typescript
+const body = await req.json();
+const input = CreateWorldSchema.parse(body);
+```
+
+### JSDoc comments
+
+Add JSDoc comments to all exported functions, classes, and types. Describe the purpose, not the implementation:
+
+```typescript
+/**
+ * Executes a SPARQL query against the specified world.
+ *
+ * @param worldId - The unique identifier of the target world.
+ * @param query - A valid SPARQL 1.1 query string.
+ * @returns The query result set.
+ */
+export async function sparql(
+  worldId: string,
+  query: string,
+): Promise<SparqlResult> {
+  // ...
+}
+```
+
+### Module boundaries
+
+Keep service classes focused on a single resource. Do not let services import from other services unless the dependency is explicit and intentional. Use dependency injection via constructor arguments rather than module-level singletons.
+
+## RDF and SPARQL
+
+### Use schema.org predicates
+
+When modeling new relationships, prefer predicates from established vocabularies before inventing custom IRIs:
+
+```sparql
+# Prefer
+<http://example.com/alice> <http://schema.org/knows> <http://example.com/bob> .
+
+# Avoid
+<http://example.com/alice> <http://myapp.com/knows> <http://example.com/bob> .
+```
+
+Commonly used vocabularies in the platform:
+
+| Prefix | Namespace |
+| :----- | :-------- |
+| `schema` | `http://schema.org/` |
+| `rdf` | `http://www.w3.org/1999/02/22-rdf-syntax-ns#` |
+| `rdfs` | `http://www.w3.org/2000/01/rdf-schema#` |
+| `owl` | `http://www.w3.org/2002/07/owl#` |
+| `xsd` | `http://www.w3.org/2001/XMLSchema#` |
+
+### SPARQL query structure
+
+Format multi-line SPARQL queries as template literals with consistent indentation:
+
+```typescript
+const result = await sdk.worlds.sparql(
+  worldId,
+  `
+  SELECT ?name ?email WHERE {
+    ?person a <http://schema.org/Person> ;
+            <http://schema.org/givenName> ?name ;
+            <http://schema.org/email> ?email .
+  }
+  ORDER BY ?name
+  LIMIT 100
+`,
+);
+```
+
+### INSERT vs INSERT DATA
+
+Use `INSERT DATA` when inserting ground triples (no variables). Use `INSERT ... WHERE` when deriving new triples from existing ones:
+
+```sparql
+# Ground triples
+INSERT DATA {
+  <http://example.com/alice> <http://schema.org/givenName> "Alice" .
+}
+
+# Derived triples
+INSERT {
+  ?person <http://schema.org/fullName> ?fullName .
+} WHERE {
+  ?person <http://schema.org/givenName> ?given ;
+          <http://schema.org/familyName> ?family .
+  BIND(CONCAT(?given, " ", ?family) AS ?fullName)
+}
+```
+
+### SPARQL safety
+
+<Warning>
+  Never interpolate untrusted user input directly into SPARQL query strings. Sanitize or validate IRI components before embedding them in queries.
+</Warning>
+
+## Testing
+
+### TestContext
+
+All service and route tests use a `TestContext` helper that provides an isolated in-memory environment. Never test against a shared or persistent database:
+
+```typescript
+import { createTestContext } from "../testing/context.ts";
+
+Deno.test("creates a world", async () => {
+  const ctx = await createTestContext();
+  const org = await createTestOrganization(ctx);
+
+  const world = await ctx.worldService.create(org.id, {
+    label: "Test world",
+  });
+
+  assertEquals(world.label, "Test world");
+});
+```
+
+`TestContext` provides:
+
+- An isolated in-memory main database client
+- Automatic schema initialization
+- A `MemoryDatabaseManager` for fresh in-memory world databases per test
+
+### Service tests
+
+Test individual resource services by performing assertions on CRUD operations. Keep each test focused on one behavior:
+
+```typescript
+Deno.test("returns null for unknown world", async () => {
+  const ctx = await createTestContext();
+  const org = await createTestOrganization(ctx);
+
+  const result = await ctx.worldService.findById(org.id, "nonexistent-id");
+
+  assertEquals(result, null);
+});
+```
+
+### Route tests
+
+Test API endpoints by executing requests using `app.fetch()` with a mock `Request`. Use `createTestOrganization(context)` to obtain a valid API key:
+
+```typescript
+Deno.test("POST /v1/worlds returns 201", async () => {
+  const ctx = await createTestContext();
+  const { apiKey } = await createTestOrganization(ctx);
+
+  const response = await app.fetch(
+    new Request("http://localhost/v1/worlds", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ label: "My world" }),
+    }),
+  );
+
+  assertEquals(response.status, 201);
+});
+```
+
+### Test file naming
+
+Place tests in a file named `<module>.test.ts` alongside the module under test. The build configuration excludes test files from published packages automatically.
+
+### What to test
+
+- Happy path: confirm the expected result for valid input
+- Error cases: confirm the correct error response for invalid input, missing records, or auth failures
+- Edge cases: empty strings, maximum lengths, boundary values
+
+## Error handling
+
+### Use ErrorResponse at route boundaries
+
+Route handlers must return structured error responses rather than throwing unhandled exceptions. Use the platform's `ErrorResponse` helper:
+
+```typescript
+import { ErrorResponse } from "../responses.ts";
+
+if (!world) {
+  return new ErrorResponse(404, "World not found");
+}
+```
+
+### Surface errors early
+
+Validate inputs as close to the entry point as possible. Do not let invalid data propagate through service layers:
+
+```typescript
+// At the route handler
+const parseResult = CreateWorldSchema.safeParse(body);
+if (!parseResult.success) {
+  return new ErrorResponse(400, parseResult.error.message);
+}
+```
+
+### Async error propagation
+
+Do not swallow errors in async functions. Let errors propagate to the route handler or wrap them with additional context:
+
+```typescript
+// Prefer — lets the route handler decide how to respond
+const world = await worldService.findById(orgId, worldId);
+
+// Avoid — silently returns undefined on any error
+const world = await worldService.findById(orgId, worldId).catch(() => undefined);
+```
+
+## Local data management
+
+During local development, all state is stored in the `data` directory:
+
+```text
+data/
+├── identity.json         # Mock database for organizations and users
+└── {org_id}/
+    ├── registry.db       # Primary registry of worlds
+    └── worlds/
+        └── {world_id}.db # Triples and embeddings for a world
+```
+
+To reset local state and start fresh, delete the contents of the `data` directory. Use `deno task reset` to terminate lingering Deno processes if ports are already in use.

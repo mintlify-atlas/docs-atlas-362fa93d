@@ -1,0 +1,104 @@
+---
+title: "Tutorials"
+description: "Step-by-step tutorials for building AI agents and applications with the Worlds Platform."
+---
+
+The following tutorials walk through complete, end-to-end implementations using the Worlds Platform.
+
+## Getting started
+
+<Card title="Quickstart: your first world" icon="rocket" href="/overview/getting-started/quickstart">
+  Install the SDK, create a world, import sample data, and run your first SPARQL query and semantic search in under 10 minutes.
+</Card>
+
+## Core tutorials
+
+<CardGroup cols={2}>
+  <Card title="Building a personal researcher" icon="user">
+    From zero to a fully grounded personal AI assistant. Covers world creation, ontology design, document ingestion, and building a chat interface backed by graph-RAG.
+
+    **What you'll build:** An agent that remembers facts about your work, projects, and relationships — and answers questions with full symbolic provenance.
+
+    **Covers:**
+    - Designing a personal memory ontology
+    - Ingesting daily notes as RDF triples
+    - Connecting the Vercel AI SDK for chat
+    - Handling evolving facts with SPARQL updates
+  </Card>
+
+  <Card title="Corporate knowledge graph" icon="building">
+    Build an internal knowledge base for your organization. Model teams, projects, documents, and decision history.
+
+    **What you'll build:** A queryable graph of your organization that answers questions like "Who owns the authentication service?" and "What decisions were made in Q1?"
+
+    **Covers:**
+    - Importing structured data from CSV and JSON
+    - Designing a corporate ontology
+    - Multi-hop graph traversal queries
+    - Connecting Slack and Notion as data sources
+  </Card>
+
+  <Card title="Graph RAG pipeline" icon="diagram-project">
+    Build a production Graph RAG pipeline that outperforms traditional vector-only RAG on relational questions.
+
+    **Covers:**
+    - Ingesting a large document corpus as triples
+    - Ontology-grounded query generation
+    - Combining semantic search with SPARQL for hybrid retrieval
+    - Benchmarking accuracy vs. traditional RAG
+  </Card>
+
+  <Card title="MCP server for AI agents" icon="server">
+    Expose your Worlds knowledge graph as a Model Context Protocol (MCP) server so any MCP-compatible AI client can query it.
+
+    **Covers:**
+    - Setting up an MCP server with the Worlds SDK
+    - Defining `search` and `sparql` tools
+    - Connecting to Claude Desktop and other MCP clients
+  </Card>
+</CardGroup>
+
+## Advanced tutorials
+
+<AccordionGroup>
+  <Accordion title="Advanced SPARQL optimization">
+    Write performant queries for complex graphs. Covers:
+    - Query planning and execution order
+    - Using `VALUES` to avoid repeated queries
+    - Aggregate queries with `GROUP BY` and `HAVING`
+    - Debugging slow queries with `EXPLAIN`-style patterns
+  </Accordion>
+
+  <Accordion title="Scaling to enterprise: multi-tenant worlds">
+    Managing multi-tenant deployments where each customer or team has an isolated world. Covers:
+    - Creating and managing worlds programmatically
+    - Access control with per-world API keys
+    - Monitoring activity across all worlds
+    - Automating world provisioning with Turso
+  </Accordion>
+
+  <Accordion title="Ontology-first agent design">
+    Design agents that reason correctly by grounding every query in a predefined ontology. Covers:
+    - Designing domain-specific OWL ontologies
+    - Schema introspection at runtime
+    - Preventing hallucinated predicates
+    - Iterative ontology evolution
+  </Accordion>
+
+  <Accordion title="Document ingestion pipeline">
+    Build a production pipeline that converts unstructured documents into queryable RDF triples. Covers:
+    - PDF and markdown parsing
+    - LLM-based triple extraction
+    - Provenance tracking with PROV-O
+    - Incremental updates and deduplication
+  </Accordion>
+</AccordionGroup>
+
+## Tutorial prerequisites
+
+Before following the tutorials above, ensure you have:
+
+- Deno 2.x installed
+- A running Worlds server (see [Production deployment](/guides/hosting/production))
+- The `@wazoo/worlds-sdk` package installed (`deno add jsr:@wazoo/worlds-sdk`)
+- A valid `WORLDS_API_KEY` environment variable

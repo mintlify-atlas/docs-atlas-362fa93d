@@ -1,0 +1,223 @@
+---
+title: "Ontology RAG"
+description: "Ground agentic reasoning in predefined schemas to eliminate hallucination and enable deterministic retrieval."
+---
+
+Ontology RAG leverages rigid, predefined schemas to guide agentic reasoning and data retrieval. By grounding your agent in an ontology, it only uses terms that actually exist in your world's schema — eliminating hallucinated predicates and malformed queries.
+
+## Why ontologies matter for agents
+
+Without an ontology, an LLM may fabricate predicate names or entity types that don't exist in your graph. With ontology RAG:
+
+- **Zero hallucination**: Agents only query using predicates and classes that exist in the schema.
+- **Complex logic**: Handle transitive relationships and inverse properties invisible to vector searches.
+- **Deterministic reliability**: The agent's mental model matches the actual data structure.
+- **Composable queries**: Multi-hop traversals become predictable when every step follows a defined schema.
+
+## Defining an ontology in Turtle
+
+An ontology declares the vocabulary your world uses. You can use established ontologies like schema.org or define a custom one.
+
+```turtle
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/ontology#> .
+
+# Class definitions
+ex:Person a owl:Class ;
+    rdfs:label "Person" ;
+    rdfs:comment "A human agent in the system." .
+
+ex:Project a owl:Class ;
+    rdfs:label "Project" ;
+    rdfs:comment "A unit of work with defined scope." .
+
+ex:Task a owl:Class ;
+    rdfs:label "Task" ;
+    rdfs:comment "An atomic unit of work within a project." .
+
+# Property definitions
+ex:workingOn a owl:ObjectProperty ;
+    rdfs:label "workingOn" ;
+    rdfs:domain ex:Person ;
+    rdfs:range ex:Project ;
+    rdfs:comment "Indicates the project a person is actively contributing to." .
+
+ex:assignedTo a owl:ObjectProperty ;
+    rdfs:label "assignedTo" ;
+    rdfs:domain ex:Task ;
+    rdfs:range ex:Person .
+
+ex:partOf a owl:ObjectProperty ;
+    rdfs:label "partOf" ;
+    rdfs:domain ex:Task ;
+    rdfs:range ex:Project .
+```
+
+## Importing an ontology into a world
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+const ontologyTurtle = await Deno.readTextFile("./ontology.ttl");
+
+await sdk.worlds.import("my-world", ontologyTurtle, { format: "turtle" });
+```
+
+## Schema introspection via SPARQL
+
+An agent can discover the world's schema before constructing queries.
+
+### List all classes
+
+```typescript
+const classes = await sdk.worlds.sparql("my-world", `
+  PREFIX owl: <http://www.w3.org/2002/07/owl#>
+  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+  SELECT ?class ?label ?comment WHERE {
+    ?class a owl:Class .
+    OPTIONAL { ?class rdfs:label ?label . }
+    OPTIONAL { ?class rdfs:comment ?comment . }
+  }
+`);
+```
+
+### List all properties with domains and ranges
+
+```typescript
+const properties = await sdk.worlds.sparql("my-world", `
+  PREFIX owl: <http://www.w3.org/2002/07/owl#>
+  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+  SELECT ?property ?label ?domain ?range WHERE {
+    ?property a owl:ObjectProperty .
+    OPTIONAL { ?property rdfs:label ?label . }
+    OPTIONAL { ?property rdfs:domain ?domain . }
+    OPTIONAL { ?property rdfs:range ?range . }
+  }
+`);
+```
+
+## The ontology RAG workflow
+
+<Steps>
+  <Step title="Discover the schema">
+    Before processing a user request, the agent queries the world to retrieve all available classes and properties.
+
+    ```typescript
+    async function discoverSchema(worldId: string) {
+      const result = await sdk.worlds.sparql(worldId, `
+        PREFIX owl: <http://www.w3.org/2002/07/owl#>
+        PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+        SELECT ?class ?property ?domain ?range WHERE {
+          OPTIONAL {
+            ?class a owl:Class .
+          }
+          OPTIONAL {
+            ?property a owl:ObjectProperty ;
+                      rdfs:domain ?domain ;
+                      rdfs:range ?range .
+          }
+        }
+      `);
+      return result;
+    }
+    ```
+  </Step>
+
+  <Step title="Map natural language to schema terms">
+    Provide the schema to the LLM and ask it to map the user's intent to exact ontology terms.
+
+    ```typescript
+    const schema = await discoverSchema("my-world");
+
+    const systemPrompt = `
+    You are an agent that constructs SPARQL queries.
+    You MUST only use the following classes and properties:
+
+    ${JSON.stringify(schema, null, 2)}
+
+    Return a valid SPARQL SELECT query. Do not invent any term not listed above.
+    `;
+    ```
+  </Step>
+
+  <Step title="Execute the grounded query">
+    Run the ontology-constrained SPARQL query against the world.
+
+    ```typescript
+    const sparqlQuery = await llm.generate(systemPrompt + userQuestion);
+    const result = await sdk.worlds.sparql("my-world", sparqlQuery);
+    ```
+  </Step>
+
+  <Step title="Return grounded results">
+    Return results to the user with symbolic provenance — each result traces back to exact triples.
+  </Step>
+</Steps>
+
+## Namespace management
+
+Keep prefix declarations consistent across queries and ingestion to avoid IRI mismatches.
+
+```typescript
+// Define your namespace prefixes centrally
+const PREFIXES = `
+  PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+  PREFIX owl:  <http://www.w3.org/2002/07/owl#>
+  PREFIX xsd:  <http://www.w3.org/2001/XMLSchema#>
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex:   <http://example.com/>
+`;
+
+async function query(worldId: string, sparqlBody: string) {
+  return sdk.worlds.sparql(worldId, `${PREFIXES}\n${sparqlBody}`);
+}
+
+// Reuse across all queries
+const result = await query("my-world", `
+  SELECT ?name WHERE {
+    ex:ethan schema:givenName ?name .
+  }
+`);
+```
+
+## Using schema.org as a base ontology
+
+For general-purpose knowledge graphs, schema.org provides a broad, well-maintained vocabulary:
+
+```turtle
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/> .
+
+# People
+ex:alice a schema:Person ;
+    schema:givenName "Alice" ;
+    schema:email "alice@example.com" .
+
+# Organizations
+ex:acme a schema:Organization ;
+    schema:name "Acme Corp" .
+
+# Relationships
+ex:alice schema:worksFor ex:acme .
+ex:alice schema:knows ex:bob .
+```
+
+<Tip>
+Import your ontology before your data. This allows the search index to correctly classify entities by type and improves semantic search precision.
+</Tip>
+
+<Note>
+The Worlds server uses the N3.js library for RDF parsing and the Comunica engine for SPARQL execution. Both support standard RDF and RDFS inferencing. OWL reasoning is not performed automatically — you must construct queries that explicitly traverse the ontology structure.
+</Note>

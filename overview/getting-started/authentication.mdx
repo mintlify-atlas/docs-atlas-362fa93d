@@ -1,0 +1,105 @@
+---
+title: "Authentication"
+description: "Securing your requests to the Worlds API with Bearer tokens."
+---
+
+The Worlds API uses Bearer Token authentication. Every request must include your API key in the `Authorization` header.
+
+## How it works
+
+```http
+Authorization: Bearer <YOUR_API_KEY>
+```
+
+The server validates this token on every request before granting access to any world data.
+
+## Generating API keys
+
+Your access strategy depends on your deployment environment.
+
+<Tabs>
+  <Tab title="Cloud (console.wazoo.dev)">
+    Generate and manage scoped API keys in the [Worlds Console](https://console.wazoo.dev/settings).
+
+    <Steps>
+      <Step title="Open the Console">
+        Navigate to [console.wazoo.dev](https://console.wazoo.dev) and sign in.
+      </Step>
+      <Step title="Go to Settings">
+        Select **Settings** from the sidebar, then open the **API Keys** tab.
+      </Step>
+      <Step title="Create a key">
+        Click **New API Key**, give it a name and scope, then copy the key. Store it securely — it will not be shown again.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Self-hosted">
+    Set the `WORLDS_API_KEY` environment variable on your server. This acts as the root admin key for your instance.
+
+    ```bash
+    # .env
+    WORLDS_API_KEY="your-secret-key-here"
+    ```
+
+    Any client that presents this key has full admin access to your Worlds server.
+  </Tab>
+</Tabs>
+
+## Unprotected mode
+
+<Warning>
+  If you do not provide a `WORLDS_API_KEY`, the server runs in **Unprotected Mode**. This disables all authentication and allows anyone with network access to read and modify your data. Use it only for local development.
+</Warning>
+
+To run in unprotected mode locally, simply omit `WORLDS_API_KEY` from your `.env` file and leave the client `apiKey` as any non-empty string.
+
+## SDK initialization
+
+The SDK handles authentication automatically once you provide your key during client initialization.
+
+```typescript
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = new WorldsSdk({
+  apiKey: "YOUR_API_KEY",
+  baseUrl: "http://localhost:8000",
+});
+```
+
+The SDK attaches the `Authorization: Bearer <apiKey>` header to every request.
+
+## Direct HTTP requests
+
+If you are making raw HTTP requests (without the SDK), include the header manually:
+
+```typescript
+const response = await fetch("http://localhost:8000/worlds", {
+  headers: {
+    Authorization: `Bearer ${process.env.WORLDS_API_KEY}`,
+  },
+});
+
+const worlds = await response.json();
+```
+
+```bash
+curl http://localhost:8000/worlds \
+  -H "Authorization: Bearer YOUR_API_KEY"
+```
+
+## Environment variables reference
+
+The following variables control authentication on the server.
+
+| Variable | Required | Description |
+| :--- | :--- | :--- |
+| `WORLDS_API_KEY` | No | Root admin key. Omit to run in Unprotected Mode. |
+| `LIBSQL_AUTH_TOKEN` | No | Authentication token for the remote Turso/libSQL database. |
+
+## Admin access
+
+Certain endpoints — such as listing all worlds or managing organization-wide settings — require an admin-level key. In self-hosted scenarios, this corresponds to the `WORLDS_API_KEY` environment variable.
+
+<Info>
+  Scoped key support (per-world access control) is tracked on the [roadmap](/overview/roadmap).
+</Info>

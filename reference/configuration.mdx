@@ -1,0 +1,134 @@
+---
+title: "Configuration"
+description: "Environment variable reference for the Worlds server, management console, and CLI."
+---
+
+The Worlds Platform is configured entirely through environment variables. This page documents every variable for the API server, management console, and CLI.
+
+## World server
+
+These variables control the behavior of `@wazoo/worlds-server`. They are injected automatically by the Worlds Console in managed deployments; you only need to set them manually when self-hosting.
+
+### Example `.env`
+
+```bash
+# API key for API access.
+WORLDS_API_KEY=""
+
+# Base directory for local file storage.
+WORLDS_BASE_DIR="./worlds"
+
+# Connection URL for LibSQL/Turso database.
+LIBSQL_URL="file:./worlds.db"
+
+# Authentication token for LibSQL/Turso database.
+LIBSQL_AUTH_TOKEN=""
+
+# Token for the Turso Management API.
+# TURSO_API_TOKEN=""
+
+# Turso organization name.
+# TURSO_ORG=""
+
+# API key for OpenRouter AI (used for embeddings).
+# OPENROUTER_API_KEY=""
+
+# OpenRouter model for embeddings.
+# OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+
+# Unified vector dimensions for DB and AI.
+# WORLDS_EMBEDDINGS_DIMENSIONS="768"
+
+# Base URL for Ollama.
+# OLLAMA_BASE_URL="http://localhost:11434"
+
+# Ollama model for embeddings.
+# OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+```
+
+### Variable reference
+
+| Variable | Default | Required | Description |
+| :------- | :------ | :------- | :---------- |
+| `WORLDS_API_KEY` | — | No | Root admin API key. If omitted, the server runs in unprotected mode (all requests are granted admin access). |
+| `WORLDS_BASE_DIR` | `./worlds` | Yes | Base directory for local world file storage when not using Turso. |
+| `LIBSQL_URL` | `file:./worlds.db` | Yes | libSQL/Turso connection URL. Use `file:./path.db` for local SQLite or a `libsql://` URL for Turso. |
+| `LIBSQL_AUTH_TOKEN` | — | No | Authentication token for remote libSQL/Turso instances. |
+| `TURSO_API_TOKEN` | — | No | Turso Management API token. When set, enables per-world Turso database provisioning. |
+| `TURSO_ORG` | — | Conditional | Turso organization slug. Required when `TURSO_API_TOKEN` is set. |
+| `OPENROUTER_API_KEY` | — | No | OpenRouter API key. When set, enables high-quality OpenRouter embeddings. |
+| `OPENROUTER_EMBEDDINGS_MODEL` | `openai/text-embedding-3-small` | No | OpenRouter embedding model ID. |
+| `WORLDS_EMBEDDINGS_DIMENSIONS` | `768` | Yes | Vector dimensionality. Must match the embedding model and database schema. |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | No | Ollama API base URL. Used when `OPENROUTER_API_KEY` is not set. |
+| `OLLAMA_EMBEDDINGS_MODEL` | `nomic-embed-text` | No | Ollama embedding model name. |
+
+<Warning>
+  `WORLDS_EMBEDDINGS_DIMENSIONS` must be consistent across all environments that share a database. Changing this value after the database has been initialised will cause search to fail.
+</Warning>
+
+## Management console
+
+These variables are required in the Console environment for production cloud deployments.
+
+| Variable | Mode | Description |
+| :------- | :--- | :---------- |
+| `WORKOS_API_KEY` | Production | Enables remote WorkOS management. |
+| `WORKOS_CLIENT_ID` | Production | Required for AuthKit login. |
+| `WORKOS_COOKIE_PASSWORD` | Production | Password used to encrypt secure session cookies. |
+| `WORKOS_REDIRECT_URI` | Production | AuthKit redirect URI (e.g. `http://localhost:3000/callback`). |
+| `DENO_DEPLOY_TOKEN` | Production | Enables remote Deno Deploy orchestration. |
+| `TURSO_API_TOKEN` | Production | Enables remote Turso database provisioning. |
+| `TURSO_ORG` | Production | Turso organization slug. |
+| `WORLDS_EMBEDDINGS_DIMENSIONS` | Both | Sets unified vector dimensions (default: `768`). |
+| `OPENROUTER_API_KEY` | Both | Global fallback for embeddings. |
+| `OPENROUTER_MANAGEMENT_KEY` | Production | Enables automatic per-app API key generation via OpenRouter. |
+| `OLLAMA_BASE_URL` | Both | Ollama API URL (default: `http://127.0.0.1:11434`). |
+| `OLLAMA_EMBEDDINGS_MODEL` | Both | Ollama model (default: `nomic-embed-text`). |
+
+## CLI
+
+| Variable | Mode | Description |
+| :------- | :--- | :---------- |
+| `WORLDS_API_KEY` | Remote | API key for connecting to a remote server. |
+| `WORLDS_BASE_URL` | Remote | Base URL of the remote server (e.g. `https://api.wazoo.dev`). |
+| `LIBSQL_URL` | Local | Database connection URL for local in-process mode. |
+| `OPENROUTER_API_KEY` | Chat | Required for the `worlds chat` command. |
+| `OPENROUTER_MODEL` | Chat | LLM model for chat (default: `google/gemini-2.0-flash-001`). |
+
+## Embedding providers
+
+The server selects an embedding provider at startup based on which variables are present:
+
+<Steps>
+  <Step title="OpenRouter (recommended for cloud)">
+    When `OPENROUTER_API_KEY` is set, the server uses the OpenRouter embedding API with the model specified by `OPENROUTER_EMBEDDINGS_MODEL` (default: `openai/text-embedding-3-small`).
+
+    ```bash
+    OPENROUTER_API_KEY="sk-or-..."
+    OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+    WORLDS_EMBEDDINGS_DIMENSIONS="1536"
+    ```
+  </Step>
+  <Step title="Ollama (default for local/private)">
+    When no cloud key is present, the server connects to a local Ollama instance. Ensure Ollama is running and the model is pulled.
+
+    ```bash
+    OLLAMA_BASE_URL="http://127.0.0.1:11434"
+    OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+    WORLDS_EMBEDDINGS_DIMENSIONS="768"
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The `WORLDS_EMBEDDINGS_DIMENSIONS` value must match the output dimensionality of the selected model. `nomic-embed-text` produces 768-dimensional vectors; `openai/text-embedding-3-small` produces 1536-dimensional vectors by default.
+</Note>
+
+## Database strategies
+
+The server supports two database strategies for per-world storage:
+
+| Strategy | When | Description |
+| :------- | :--- | :---------- |
+| **File-based** | `TURSO_API_TOKEN` is not set | Each world is stored as files in `WORLDS_BASE_DIR`. Uses a single shared libSQL database for metadata. |
+| **Turso-managed** | `TURSO_API_TOKEN` and `TURSO_ORG` are set | Each world is provisioned as its own Turso database via the Turso Management API. Enables horizontal scale and isolation. |

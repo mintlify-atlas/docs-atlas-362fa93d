@@ -1,0 +1,280 @@
+---
+title: "Integrations"
+description: "Connect the Worlds Platform to the Vercel AI SDK, OpenRouter, LangChain, and Model Context Protocol."
+---
+
+Worlds integrates with the most common AI toolchains. The SDK is framework-agnostic and works anywhere Deno or Node.js runs.
+
+## Vercel AI SDK
+
+The [Vercel AI SDK](https://sdk.vercel.ai) provides a `tool()` helper for defining agent tools. Wrap `sdk.worlds.search()` and `sdk.worlds.sparql()` as tools to give any AI model access to your knowledge graph.
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { generateText, tool } from "ai";
+import { z } from "zod";
+
+const sdk = createWorldsSdk({
+  baseUrl: Deno.env.get("WORLDS_BASE_URL")!,
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+const WORLD_ID = "my-world";
+
+const { text } = await generateText({
+  model: yourModel,
+  system: "You answer questions using a knowledge graph. Use search to find facts.",
+  prompt: "What projects is Alice working on?",
+  tools: {
+    search: tool({
+      description: "Semantic search over the knowledge graph",
+      parameters: z.object({
+        query: z.string(),
+        limit: z.number().int().min(1).max(20).optional().default(10),
+      }),
+      execute: ({ query, limit }) =>
+        sdk.worlds.search(WORLD_ID, query, { limit }),
+    }),
+    sparql: tool({
+      description: "Execute a SPARQL SELECT query for precise graph lookups",
+      parameters: z.object({
+        query: z.string().describe("A valid SPARQL SELECT query"),
+      }),
+      execute: ({ query }) => sdk.worlds.sparql(WORLD_ID, query),
+    }),
+    insertFact: tool({
+      description: "Store a new fact in the knowledge graph",
+      parameters: z.object({
+        subject: z.string().describe("Subject IRI"),
+        predicate: z.string().describe("Predicate IRI"),
+        object: z.string().describe("Object IRI or literal value"),
+      }),
+      execute: ({ subject, predicate, object }) =>
+        sdk.worlds.sparql(WORLD_ID, `
+          INSERT DATA {
+            <${subject}> <${predicate}> "${object}" .
+          }
+        `),
+    }),
+  },
+  maxSteps: 5,
+});
+```
+
+## OpenRouter
+
+[OpenRouter](https://openrouter.ai) provides a unified API for 200+ AI models. Use it with the Vercel AI SDK provider:
+
+```typescript
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { generateText } from "ai";
+
+const openrouter = createOpenRouter({
+  apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
+});
+
+const { text } = await generateText({
+  model: openrouter("anthropic/claude-3-5-sonnet"),
+  // ... tools as above
+});
+```
+
+OpenRouter is also the recommended embedding provider for the Worlds server in production. Configure it in your server environment:
+
+```bash
+OPENROUTER_API_KEY="sk-or-..."
+OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+WORLDS_EMBEDDINGS_DIMENSIONS="1536"
+```
+
+## Model Context Protocol (MCP)
+
+MCP is an open standard for connecting AI models to external tools and data sources. Wrap the Worlds SDK as an MCP server to make your knowledge graph available to any MCP-compatible client (Claude Desktop, Cursor, Continue, etc.).
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const sdk = createWorldsSdk({
+  baseUrl: Deno.env.get("WORLDS_BASE_URL")!,
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+const WORLD_ID = Deno.env.get("WORLDS_WORLD_ID") ?? "my-world";
+
+const server = new McpServer({
+  name: "worlds-mcp",
+  version: "1.0.0",
+});
+
+server.tool(
+  "search",
+  "Semantic search over the knowledge graph",
+  { query: z.string(), limit: z.number().optional() },
+  async ({ query, limit }) => ({
+    content: [{
+      type: "text",
+      text: JSON.stringify(
+        await sdk.worlds.search(WORLD_ID, query, { limit }),
+        null,
+        2
+      ),
+    }],
+  }),
+);
+
+server.tool(
+  "sparql",
+  "Execute a SPARQL query",
+  { query: z.string() },
+  async ({ query }) => ({
+    content: [{
+      type: "text",
+      text: JSON.stringify(
+        await sdk.worlds.sparql(WORLD_ID, query),
+        null,
+        2
+      ),
+    }],
+  }),
+);
+
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+Add this to your Claude Desktop `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "worlds": {
+      "command": "deno",
+      "args": ["run", "-A", "./mcp-server.ts"],
+      "env": {
+        "WORLDS_BASE_URL": "http://localhost:8000",
+        "WORLDS_API_KEY": "your-api-key",
+        "WORLDS_WORLD_ID": "my-world"
+      }
+    }
+  }
+}
+```
+
+## LangChain
+
+Worlds can be integrated with LangChain as a custom retriever or tool:
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { DynamicTool } from "@langchain/core/tools";
+
+const sdk = createWorldsSdk({
+  baseUrl: process.env.WORLDS_BASE_URL!,
+  apiKey: process.env.WORLDS_API_KEY!,
+});
+
+const WORLD_ID = "my-world";
+
+const searchTool = new DynamicTool({
+  name: "worlds_search",
+  description: "Semantic search over a knowledge graph. Returns relevant RDF triples.",
+  func: async (query: string) => {
+    const results = await sdk.worlds.search(WORLD_ID, query, { limit: 10 });
+    return results
+      .map((r) => `${r.subject} ${r.predicate} ${r.object}`)
+      .join("\n");
+  },
+});
+
+const sparqlTool = new DynamicTool({
+  name: "worlds_sparql",
+  description: "Execute a SPARQL SELECT query against the knowledge graph.",
+  func: async (query: string) => {
+    const result = await sdk.worlds.sparql(WORLD_ID, query);
+    return JSON.stringify(result, null, 2);
+  },
+});
+
+// Use with any LangChain agent
+const tools = [searchTool, sparqlTool];
+```
+
+## Discord bot
+
+Give a Discord bot long-term memory using Worlds as its knowledge store:
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { Client, Events, GatewayIntentBits } from "discord.js";
+
+const sdk = createWorldsSdk({
+  baseUrl: process.env.WORLDS_BASE_URL!,
+  apiKey: process.env.WORLDS_API_KEY!,
+});
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+});
+
+client.on(Events.MessageCreate, async (message) => {
+  if (message.author.bot) return;
+
+  // Store the message as a triple
+  const userIri = `http://example.com/discord/user/${message.author.id}`;
+  const msgIri = `http://example.com/discord/message/${message.id}`;
+
+  await sdk.worlds.sparql("discord-memory", `
+    PREFIX schema: <http://schema.org/>
+    PREFIX dc: <http://purl.org/dc/terms/>
+    PREFIX ex: <http://example.com/discord/>
+
+    INSERT DATA {
+      <${msgIri}>
+          a schema:Message ;
+          schema:author <${userIri}> ;
+          schema:text "${message.content.replace(/"/g, "\\"")}" ;
+          dc:created "${new Date().toISOString()}"^^<http://www.w3.org/2001/XMLSchema#dateTime> .
+    }
+  `);
+});
+
+client.login(process.env.DISCORD_TOKEN);
+```
+
+## Slack app
+
+Similarly, a Slack app can use Worlds to maintain organizational memory:
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { App } from "@slack/bolt";
+
+const sdk = createWorldsSdk({
+  baseUrl: process.env.WORLDS_BASE_URL!,
+  apiKey: process.env.WORLDS_API_KEY!,
+});
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+});
+
+app.message(async ({ message, say }) => {
+  if (message.subtype || !("text" in message) || !message.text) return;
+
+  // Search for related facts
+  const results = await sdk.worlds.search("slack-memory", message.text, {
+    limit: 5,
+  });
+
+  if (results.length > 0) {
+    const context = results.map((r) => r.object).join(", ");
+    await say(`I found relevant context: ${context}`);
+  }
+});
+
+await app.start();
+```

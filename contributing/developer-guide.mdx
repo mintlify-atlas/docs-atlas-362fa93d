@@ -1,0 +1,302 @@
+---
+title: "Developer guide"
+description: "Prerequisites, environment setup, running the full stack locally, testing, and publishing changes for Worlds Platform contributors."
+---
+
+This guide walks you through setting up a local development environment and contributing to the Worlds Platform monorepo. See the [Architecture](/overview/architecture) page for a high-level overview of the system design.
+
+## Prerequisites
+
+Install the following tools before you begin:
+
+<CardGroup cols={3}>
+  <Card title="Deno" icon="code" href="https://deno.com">
+    Version 2.x or later. The primary runtime for the server, SDK, and CLI.
+  </Card>
+  <Card title="Node.js" icon="js" href="https://nodejs.org">
+    Version 20 or later. Required for the console and documentation packages.
+  </Card>
+  <Card title="Git" icon="git-branch" href="https://git-scm.com">
+    For version control and submitting pull requests.
+  </Card>
+</CardGroup>
+
+## Cloning the repository
+
+```bash
+git clone https://github.com/wazootech/worlds.git
+cd worlds
+```
+
+Then install all dependencies across the monorepo:
+
+```bash
+deno task install
+```
+
+This runs `npm install` for both the console (`packages/console`) and docs (`packages/docs`) packages, which require Node.js.
+
+## Monorepo structure
+
+Worlds is organized as a Deno workspace containing the following packages:
+
+```text
+worlds/
+├── packages/
+│   ├── server/      # Deno REST API server
+│   ├── sdk/         # TypeScript SDK (@wazoo/worlds-sdk)
+│   ├── ai-sdk/      # AI SDK tools (@wazoo/worlds-ai-sdk)
+│   ├── cli/         # CLI tool (@wazoo/worlds-cli)
+│   ├── console/     # Web console (Next.js)
+│   └── docs/        # Documentation site (Mintlify)
+├── deno.json        # Root workspace and task configuration
+└── README.md
+```
+
+## Setting up environment variables
+
+### Server
+
+Copy the example environment file into `packages/server/.env`:
+
+```bash
+cp packages/server/.env.example packages/server/.env
+```
+
+Then edit the file to set your local values:
+
+```dotenv
+# API key for API access
+WORLDS_API_KEY="your-local-api-key"
+
+# Base directory for local file storage
+WORLDS_BASE_DIR="./worlds"
+
+# Connection URL for LibSQL/Turso database
+LIBSQL_URL="file:./worlds.db"
+
+# Authentication token (leave empty for local SQLite)
+LIBSQL_AUTH_TOKEN=""
+```
+
+<Note>
+  Leave `LIBSQL_AUTH_TOKEN` empty when using a local SQLite file. It is only required for remote Turso databases.
+</Note>
+
+For cloud embeddings, uncomment and populate the OpenRouter variables:
+
+```dotenv
+# OPENROUTER_API_KEY="your-openrouter-key"
+# OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+# WORLDS_EMBEDDINGS_DIMENSIONS="768"
+```
+
+### CLI
+
+Copy the CLI example file:
+
+```bash
+cp packages/cli/.env.example packages/cli/.env
+```
+
+The CLI supports two modes:
+
+<Tabs>
+  <Tab title="Remote mode">
+    Connect to a hosted Worlds API instance:
+
+    ```dotenv
+    WORLDS_BASE_URL="https://api.wazoo.dev"
+    WORLDS_API_KEY="your-api-key"
+    ```
+  </Tab>
+  <Tab title="Local mode">
+    Run an in-process server locally:
+
+    ```dotenv
+    WORLDS_API_KEY="your-local-api-key"
+    LIBSQL_URL="file:./worlds.db"
+    LIBSQL_AUTH_TOKEN=""
+    OPENROUTER_API_KEY="your-openrouter-key"
+    OPENROUTER_MODEL="google/gemini-2.0-flash-001"
+    OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+    WORLDS_EMBEDDINGS_DIMENSIONS="768"
+    OLLAMA_BASE_URL="http://localhost:11434"
+    OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+    ```
+  </Tab>
+</Tabs>
+
+## Running the full stack locally
+
+Open separate terminal windows (or use a process manager) and start each service:
+
+<Steps>
+  <Step title="Start the API server">
+    ```bash
+    deno task start:server
+    ```
+
+    The server starts at `http://localhost:8000` by default.
+  </Step>
+
+  <Step title="Start the web console">
+    ```bash
+    deno task start
+    ```
+
+    Opens the Next.js console at `http://localhost:3000`.
+  </Step>
+
+  <Step title="(Optional) Start the CLI">
+    ```bash
+    deno task start:cli
+    ```
+  </Step>
+
+  <Step title="(Optional) Start the docs preview">
+    ```bash
+    deno task start:docs
+    ```
+
+    Opens the Mintlify documentation preview at `http://localhost:3000`.
+  </Step>
+</Steps>
+
+<Tip>
+  The console automatically manages local server processes. On startup it checks the local identity database and spawns a server process for every local organization.
+</Tip>
+
+## Local embeddings with Ollama
+
+By default the platform uses [Ollama](https://ollama.com) for local embeddings.
+
+<Steps>
+  <Step title="Install Ollama">
+    Download and install Ollama from [ollama.com](https://ollama.com).
+  </Step>
+
+  <Step title="Pull the embedding model">
+    The platform defaults to `nomic-embed-text`:
+
+    ```bash
+    ollama pull nomic-embed-text
+    ```
+  </Step>
+
+  <Step title="Configure the server">
+    The server connects to Ollama at `http://127.0.0.1:11434` automatically. Override this in your `.env`:
+
+    ```dotenv
+    OLLAMA_BASE_URL="http://your-ollama-host:11434"
+    OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+    ```
+  </Step>
+</Steps>
+
+## Running tests
+
+```bash
+deno task test
+```
+
+This runs the full Deno test suite across all workspace packages. Tests use an in-memory database and do not require a running server.
+
+## Making changes
+
+### Server (`packages/server`)
+
+The server follows a consistent resource pattern. Each resource lives in the internal database service directories and contains:
+
+- `queries.sql` — DDL and CRUD operations
+- `queries.sql.ts` — Generated string constants (run `deno task generate` after editing SQL)
+- `schema.ts` — Zod schemas
+- `service.ts` — Service class
+- `service.test.ts` — Unit tests using in-memory database clients
+
+<AccordionGroup>
+  <Accordion title="Adding a new resource">
+    - [ ] Create the database resource directory
+    - [ ] Add `queries.sql` with DDL and CRUD operations
+    - [ ] Run `deno task generate` to update SQL embedder files
+    - [ ] Create `schema.ts` and `service.ts`
+    - [ ] Register the table in the database initialization service
+    - [ ] Implement unit tests in `service.test.ts`
+  </Accordion>
+
+  <Accordion title="Adding a new route">
+    - [ ] Create `routes/v1/.../route.ts`
+    - [ ] Implement a default export returning a `Router` instance
+    - [ ] Register the module path in the server configuration
+    - [ ] Implement authentication, validation, and error handling
+    - [ ] Add integration tests in `route.test.ts`
+  </Accordion>
+
+  <Accordion title="Adding a new world table">
+    - [ ] Add DDL to the resource's `queries.sql` file
+    - [ ] Register the table in the world-scope portion of `initializeDatabase`
+    - [ ] Verify `DatabaseManager` implementations execute the initialization
+  </Accordion>
+</AccordionGroup>
+
+Every route handler follows this execution pattern:
+
+1. **Path parameters** — Read from `ctx.params`
+2. **Authentication** — Call `authorizeRequest` to verify identity
+3. **Validation** — Parse and validate the request body or query via Zod
+4. **Business logic** — Distribute work to services or resolve a world database client
+5. **Response** — Return success via `Response.json(record)` or an `ErrorResponse`
+
+### SDK (`packages/sdk`)
+
+The SDK is published to JSR as `@wazoo/worlds-sdk`. Changes here should be backward-compatible. Add or update tests alongside any new methods.
+
+### AI SDK (`packages/ai-sdk`)
+
+Published as `@wazoo/worlds-ai-sdk`. Provides tool-calling integrations for LLM frameworks. Keep tool definitions aligned with the SDK's API surface.
+
+### CLI (`packages/cli`)
+
+Published as `@wazoo/worlds-cli`. Changes to commands should be reflected in the help text and the CLI reference documentation.
+
+### Console (`packages/console`)
+
+The Next.js web UI. Run the pre-commit check before submitting:
+
+```bash
+npm run precommit --prefix packages/console
+```
+
+## Publishing changes
+
+Packages are published to [JSR](https://jsr.io) automatically by the CI pipeline when changes merge to `main`. Run a dry-run locally to verify the package configuration before opening a PR:
+
+```bash
+deno task publish:dry
+```
+
+<Warning>
+  Only maintainers trigger the production publish workflow. The `publish:dry` command validates the package manifest without uploading anything.
+</Warning>
+
+## Pre-commit checklist
+
+Run the full pre-commit suite before pushing your branch:
+
+```bash
+deno task precommit
+```
+
+This runs the following checks in sequence:
+
+| Step | Command |
+| :--- | :--- |
+| Format | `deno fmt` |
+| Lint | `deno lint` |
+| Type check | `deno check` |
+| Tests | `deno test -A` |
+| Docs precommit | `npm run precommit --prefix packages/docs` |
+| Console precommit | `npm run precommit --prefix packages/console` |
+| Publish dry-run | `deno publish --dry-run --allow-dirty` |
+
+The CI pipeline runs `deno fmt`, `deno lint`, and `deno task test` on every push and pull request targeting `main`.

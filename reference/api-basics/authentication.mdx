@@ -1,0 +1,113 @@
+---
+title: "Authentication"
+description: "Authenticate requests to the Worlds API using Bearer tokens."
+---
+
+The Worlds API uses **Bearer token** authentication. Every request must include your API key in the `Authorization` header.
+
+```http
+Authorization: Bearer <YOUR_API_KEY>
+```
+
+## Obtaining an API key
+
+<Tabs>
+  <Tab title="Cloud (wazoo.dev)">
+    Generate an API key from the [Worlds Console](https://console.wazoo.dev/settings).
+
+    <Steps>
+      <Step title="Sign in">
+        Go to [console.wazoo.dev](https://console.wazoo.dev) and sign in to your account.
+      </Step>
+      <Step title="Open settings">
+        Navigate to **Settings** in the sidebar.
+      </Step>
+      <Step title="Generate a key">
+        Click **Generate API key**. Copy the key immediately — it will not be shown again.
+      </Step>
+    </Steps>
+  </Tab>
+  <Tab title="Self-hosted">
+    Set the `WORLDS_API_KEY` environment variable on your server. This value becomes the **root admin key** for your instance.
+
+    ```bash
+    WORLDS_API_KEY="your-secret-api-key"
+    ```
+
+    See the [Configuration reference](/reference/configuration) for the full list of environment variables.
+  </Tab>
+</Tabs>
+
+## Unprotected mode
+
+<Warning>
+  If `WORLDS_API_KEY` is not set, the server starts in **unprotected mode** and grants full administrative access to all incoming requests without any key check. Use this only for local development.
+</Warning>
+
+When running locally without a key, you can omit the `Authorization` header entirely and every request will be treated as an authenticated admin request.
+
+## Making authenticated requests
+
+### Direct HTTP
+
+Include the `Authorization` header with every request:
+
+```bash
+curl https://api.wazoo.dev/worlds \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+### TypeScript SDK
+
+Pass the API key when initialising the SDK client. All subsequent calls handle the header automatically.
+
+```typescript
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = new WorldsSdk({
+  apiKey: "YOUR_API_KEY",
+  baseUrl: "https://api.wazoo.dev",
+});
+
+// All SDK calls include Authorization: Bearer <apiKey> automatically
+const worlds = await sdk.worlds.list();
+```
+
+### CLI
+
+Set environment variables to configure the CLI for a remote server:
+
+```bash
+export WORLDS_API_KEY="your-api-key"
+export WORLDS_BASE_URL="https://api.wazoo.dev"
+
+worlds list
+```
+
+When neither `WORLDS_BASE_URL` nor `WORLDS_API_KEY` are set, the CLI starts an **in-process local server** and generates a temporary key automatically.
+
+## Admin access
+
+All endpoints listed in the API reference require admin-level access. The `WORLDS_API_KEY` (or the key generated in the console) grants admin access. There is currently no concept of scoped or read-only keys — the key is either valid (admin) or absent/invalid (unauthorized).
+
+## Authentication error responses
+
+An invalid or missing API key returns a `401 Unauthorized` response:
+
+```json
+{
+  "error": {
+    "message": "Unauthorized"
+  }
+}
+```
+
+If the key is present but does not have permission for the specific operation, a `403 Forbidden` is returned:
+
+```json
+{
+  "error": {
+    "message": "Only admins can create worlds"
+  }
+}
+```

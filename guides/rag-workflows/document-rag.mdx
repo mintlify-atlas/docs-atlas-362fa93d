@@ -1,0 +1,194 @@
+---
+title: "Document RAG"
+description: "Ingest documents as RDF triples to enable hybrid semantic and graph-based retrieval over unstructured text."
+---
+
+Document RAG transforms unstructured text into structured, queryable knowledge. Unlike traditional vector-only RAG, Worlds maintains the relationships between document fragments and connects extracted entities into the knowledge graph — giving every retrieved chunk symbolic provenance.
+
+## The pipeline
+
+<Steps>
+  <Step title="Parse and chunk the document">
+    Break documents into meaningful segments. For RDF-based storage, each chunk maps to one or more triples.
+
+    ```typescript
+    function chunkDocument(text: string, maxChunkSize = 500): string[] {
+      const sentences = text.split(/(?<=[.!?])\s+/);
+      const chunks: string[] = [];
+      let current = "";
+
+      for (const sentence of sentences) {
+        if ((current + sentence).length > maxChunkSize && current) {
+          chunks.push(current.trim());
+          current = sentence;
+        } else {
+          current += " " + sentence;
+        }
+      }
+
+      if (current.trim()) chunks.push(current.trim());
+      return chunks;
+    }
+    ```
+  </Step>
+
+  <Step title="Extract entities and relationships">
+    Use an LLM to identify entities and facts in each chunk.
+
+    ```typescript
+    const extractionPrompt = (chunk: string) => `
+    Extract entities and relationships from the following text as RDF triples in Turtle format.
+    Use schema.org predicates where possible. Use <http://example.com/doc#> as the namespace.
+
+    Text: ${chunk}
+
+    Return only valid Turtle triples, nothing else.
+    `;
+    ```
+  </Step>
+
+  <Step title="Ingest as Turtle triples">
+    Import the extracted triples into the world using the SDK.
+
+    ```typescript
+    import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+    const sdk = createWorldsSdk({
+      baseUrl: "http://localhost:8000",
+      apiKey: Deno.env.get("WORLDS_API_KEY")!,
+    });
+
+    async function ingestDocument(worldId: string, documentText: string) {
+      const chunks = chunkDocument(documentText);
+
+      for (const chunk of chunks) {
+        const turtleTriples = await llm.extract(extractionPrompt(chunk));
+
+        await sdk.worlds.import(worldId, turtleTriples, { format: "turtle" });
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Store document provenance">
+    Link each extracted fact back to its source chunk so you can verify claims.
+
+    ```turtle
+    @prefix schema: <http://schema.org/> .
+    @prefix prov: <http://www.w3.org/ns/prov#> .
+    @prefix ex: <http://example.com/> .
+    @prefix doc: <http://example.com/doc#> .
+
+    # The extracted fact
+    ex:alice schema:worksFor ex:acme .
+
+    # Provenance linking fact to source chunk
+    doc:chunk-1 a prov:Entity ;
+        prov:wasQuotedFrom doc:report-2024 ;
+        schema:text "Alice is the lead engineer at Acme Corp." .
+
+    ex:alice schema:worksFor ex:acme
+        prov:wasDerivedFrom doc:chunk-1 .
+    ```
+  </Step>
+</Steps>
+
+## Hybrid retrieval: semantic + graph
+
+Once documents are ingested as triples, you can combine semantic search with graph traversal:
+
+```typescript
+// Step 1: Semantic search to find relevant triples
+const searchResults = await sdk.worlds.search(
+  "my-world",
+  "Alice's role at the company",
+  {
+    limit: 10,
+    subjects: ["http://example.com/alice"],
+  }
+);
+
+// Step 2: Graph query to expand context
+const subjects = [...new Set(searchResults.map((r) => r.subject))];
+const values = subjects.map((s) => `<${s}>`).join(" ");
+
+const context = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?predicate ?object WHERE {
+    VALUES ?subject { ${values} }
+    ?subject ?predicate ?object .
+  }
+`);
+```
+
+## Ingesting documents in bulk
+
+For large document corpora, batch ingestion reduces overhead:
+
+```typescript
+async function bulkIngestDocuments(
+  worldId: string,
+  documents: { id: string; text: string }[]
+) {
+  // Build one large Turtle document from all extracted facts
+  const allTriples: string[] = [
+    "@prefix schema: <http://schema.org/> .",
+    "@prefix ex: <http://example.com/> .",
+  ];
+
+  for (const doc of documents) {
+    const triples = await extractTriples(doc.text);
+    allTriples.push(triples);
+  }
+
+  const turtleData = allTriples.join("\n");
+  await sdk.worlds.import(worldId, turtleData, { format: "turtle" });
+}
+```
+
+## Benefits of graph-backed documents
+
+<CardGroup cols={3}>
+  <Card title="Contextual continuity" icon="link">
+    Follow relationships between different parts of a document or across multiple documents in a single SPARQL query.
+  </Card>
+  <Card title="Improved recall" icon="magnifying-glass">
+    Retrieve specific document segments based on their logical role in the graph, not just semantic similarity.
+  </Card>
+  <Card title="Verification" icon="shield-check">
+    Cross-reference extracted facts against the original document chunks to ensure accuracy and catch extraction errors.
+  </Card>
+</CardGroup>
+
+## Handling document updates
+
+When a document is revised, update only the affected triples:
+
+```typescript
+// Remove outdated fact
+await sdk.worlds.sparql(worldId, `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  DELETE {
+    ex:alice schema:jobTitle "Engineer" .
+  } WHERE {
+    ex:alice schema:jobTitle "Engineer" .
+  }
+`);
+
+// Insert updated fact
+await sdk.worlds.sparql(worldId, `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  INSERT DATA {
+    ex:alice schema:jobTitle "Senior Engineer" .
+  }
+`);
+```
+
+<Warning>
+Blank nodes (anonymous nodes in Turtle, written as `[]` or `_:label`) are not stable across ingestion operations. Always use IRIs for entities you may need to update or reference in future queries. The server skolemizes blank nodes automatically during import, but you will not be able to predict their generated IRIs.
+</Warning>

@@ -1,0 +1,381 @@
+---
+title: "Neuro-symbolic agent integration"
+description: "Build AI agents that read from and write to a Worlds knowledge graph using the worlds-ai-sdk and Vercel AI SDK tool-calling."
+---
+
+This is the final module of the Worlds Academy. You now understand world memory, the RDF triple model, and SPARQL. This module shows you how to connect an LLM to a World so the agent can use that knowledge — and update it — through tool-calling.
+
+## The neuro-symbolic architecture
+
+The Worlds Platform bridges two complementary paradigms:
+
+- **Neural**: The Large Language Model that processes natural language, understands context, and generates responses.
+- **Symbolic**: The World knowledge graph that stores structured facts, follows explicit logic, and maintains persistent state.
+
+Neither paradigm is sufficient alone. LLMs are powerful reasoners but have no persistent memory and can hallucinate facts. Knowledge graphs are precise and persistent but cannot understand natural language. Together, they create agents that are both fluent and factually grounded.
+
+```
+User prompt
+    │
+    ▼
+┌─────────────┐     tool call      ┌──────────────────┐
+│     LLM     │ ──────────────────▶│  worlds-ai-sdk   │
+│  (neural)   │ ◀──────────────── │  (bridge layer)  │
+└─────────────┘   structured data  └──────────────────┘
+                                           │
+                                    SPARQL / search
+                                           │
+                                           ▼
+                                  ┌────────────────┐
+                                  │  World (graph) │
+                                  │  (symbolic)    │
+                                  └────────────────┘
+```
+
+## The `worlds-ai-sdk` toolkit
+
+The `@wazoo/worlds-ai-sdk` package provides a set of pre-built tools designed for LLM tool-calling. Each tool encapsulates a specific capability:
+
+| Tool                   | Description                                                           |
+| :--------------------- | :-------------------------------------------------------------------- |
+| `executeSparql`        | Execute SPARQL queries and updates against a world knowledge base     |
+| `searchEntities`       | Semantic search for entities — returns ranked candidates              |
+| `disambiguateEntities` | Pick the best entity match from a set of candidates                   |
+| `generateIri`          | Mint a new unique IRI for a new entity                                |
+| `discoverSchema`       | Discover available RDF classes and properties in the knowledge base   |
+| `validateRdf`          | Validate RDF triples against SHACL shapes                            |
+
+These tools implement the full **entity resolution pipeline**: search → disambiguate → (generate IRI if new) → read/write via SPARQL.
+
+## Setting up the SDK
+
+<Steps>
+  <Step title="Install the packages">
+    <Tabs>
+      <Tab title="npm">
+        ```bash
+        npm install @wazoo/worlds-sdk @wazoo/worlds-ai-sdk
+        ```
+      </Tab>
+      <Tab title="pnpm">
+        ```bash
+        pnpm add @wazoo/worlds-sdk @wazoo/worlds-ai-sdk
+        ```
+      </Tab>
+      <Tab title="yarn">
+        ```bash
+        yarn add @wazoo/worlds-sdk @wazoo/worlds-ai-sdk
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Create a WorldsSdk instance">
+    ```typescript
+    import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+    const sdk = new WorldsSdk({
+      baseUrl: "http://localhost:8000",
+      apiKey: process.env.WORLDS_API_KEY!,
+    });
+    ```
+  </Step>
+
+  <Step title="Create tools and attach them to your agent">
+    ```typescript
+    import { generateText } from "ai";
+    import { openai } from "@ai-sdk/openai";
+    import { createTools } from "@wazoo/worlds-ai-sdk";
+
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      tools: createTools({
+        sdk,
+        sources: [{ id: "my-world-id" }],
+      }),
+      prompt: "Find all team members and summarize their roles.",
+    });
+
+    console.log(text);
+    ```
+  </Step>
+</Steps>
+
+## How `createTools` works
+
+The `createTools` function accepts a `CreateToolsOptions` object and returns a tools record compatible with the Vercel AI SDK:
+
+```typescript
+export interface CreateToolsOptions {
+  // The WorldsSdk instance to use for all tool calls
+  sdk: WorldsSdk;
+
+  // The list of world sources visible to the agent
+  // Sources with { write: true } allow INSERT/DELETE operations
+  sources: Source[];
+
+  // Optional: custom IRI generator for new entities
+  generateIri?: () => string | Promise<string>;
+
+  // Optional: custom entity disambiguation logic
+  disambiguate?: (
+    input: DisambiguateEntitiesInput,
+  ) => DisambiguateEntitiesOutput | Promise<DisambiguateEntitiesOutput>;
+
+  // Optional: SHACL shapes (Turtle) for triple validation
+  shacl?: string;
+}
+```
+
+<Warning>
+  By default, sources are **read-only**. An agent can only execute `SELECT`, `ASK`, `CONSTRUCT`, and `DESCRIBE` queries. To allow `INSERT DATA` and `DELETE DATA`, set `write: true` on a source: `{ id: "my-world-id", write: true }`.
+</Warning>
+
+## The `executeSparql` tool
+
+The core tool for structured knowledge retrieval and updates. The LLM calls this with a SPARQL query or update string:
+
+```typescript
+// Tool input schema
+{
+  source: string;  // The world ID to query
+  sparql: string;  // The SPARQL query or update
+}
+```
+
+The tool validates write operations against the source's `write` permission before executing:
+
+```typescript
+// From the source:
+execute: async (input: ExecuteSparqlInput) => {
+  const { sparql, source } = input;
+  if (
+    isSparqlUpdate(sparql) &&
+    !(sources.find((s: Source) => s.id === source)?.write ?? false)
+  ) {
+    throw new Error(
+      "Write operations are disabled. This source is configured as read-only. " +
+        "Only SELECT, ASK, CONSTRUCT, and DESCRIBE queries are allowed.",
+    );
+  }
+
+  return await sdk.worlds.sparql(source, sparql);
+},
+```
+
+## The `searchEntities` tool
+
+Hybrid search that combines vector embeddings (TensorFlow Universal Sentence Encoder) with SPARQL graph traversal. Use this when the agent needs to resolve a natural-language entity reference to a URI before querying:
+
+```typescript
+// Tool input schema
+{
+  source: string;      // The world ID to search
+  query: string;       // The entity name or description
+  types?: string[];    // Optional: filter by RDF type IRIs
+  limit?: number;      // Default: 10, max: 100
+}
+
+// Tool output schema
+{
+  results: TripleSearchResult[];  // Ranked by Reciprocal Rank Fusion
+}
+```
+
+## The entity resolution workflow
+
+Before inserting new data, a well-behaved agent should always check whether the entity already exists. The `worlds-ai-sdk` provides a three-step pipeline for this:
+
+<Steps>
+  <Step title="Search for the entity">
+    ```typescript
+    // Agent calls searchEntities
+    const results = await searchEntities({
+      source: "my-world-id",
+      query: "Alice Smith",
+      types: ["http://schema.org/Person"],
+    });
+    ```
+  </Step>
+
+  <Step title="Disambiguate the candidates">
+    ```typescript
+    // Agent calls disambiguateEntities with the search results
+    const { match, confidence, reason } = await disambiguateEntities({
+      candidates: results.results,
+      query: "Alice Smith",
+    });
+
+    // match is the best TripleSearchResult, or null if none found
+    ```
+
+    The default disambiguation logic:
+    1. Checks for an exact label match (confidence = 1.0).
+    2. Falls back to the highest-scoring RRF result if score > 0.5.
+    3. Returns `null` if all candidates are below threshold.
+  </Step>
+
+  <Step title="Insert or update">
+    ```typescript
+    if (match) {
+      // Entity already exists — use its IRI
+      const entityIri = match.subject;
+      // ... update existing entity
+    } else {
+      // New entity — generate a fresh IRI first
+      const { iri } = await generateIri({ referenceText: "Alice Smith" });
+      // Then insert via executeSparql
+    }
+    ```
+  </Step>
+</Steps>
+
+## Multi-step reasoning example
+
+Here is a complete example showing an agent performing multi-step reasoning over the solar system dataset:
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+import { createTools } from "@wazoo/worlds-ai-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: process.env.WORLDS_API_KEY!,
+});
+
+// Import the solar system data first
+import { readFile } from "node:fs/promises";
+const turtle = await readFile("solar_system.ttl", "utf-8");
+await sdk.worlds.import("solar-system", turtle, { format: "turtle" });
+
+// Run an agent against the world
+const { text, steps } = await generateText({
+  model: openai("gpt-4o"),
+  tools: createTools({
+    sdk,
+    sources: [{ id: "solar-system" }],
+  }),
+  maxSteps: 5,
+  prompt: `
+    Using the solar system knowledge base:
+    1. List all planets in order from the Sun.
+    2. Identify which planet is 5th from the Sun.
+    3. Return a brief description of that planet.
+  `,
+});
+
+console.log(text);
+// The 5th planet from the Sun is Jupiter — the largest planet in the Solar System.
+```
+
+The agent's internal reasoning loop:
+1. Calls `executeSparql` with a SELECT query to list planets by order.
+2. Identifies Jupiter from the results (order = 5).
+3. Calls `executeSparql` again to retrieve Jupiter's description.
+4. Synthesizes a natural-language response from the structured data.
+
+## System flow
+
+<Steps>
+  <Step title="User prompt">
+    A natural-language question or instruction is sent to the LLM.
+  </Step>
+
+  <Step title="Tool selection">
+    The LLM determines it needs information from its World and generates a tool call — typically starting with `searchEntities` to resolve entity references, then `executeSparql` for precise retrieval.
+  </Step>
+
+  <Step title="Execution">
+    The `worlds-ai-sdk` executes the tool: runs the SPARQL query or search against the Worlds API and returns structured results.
+  </Step>
+
+  <Step title="Inference">
+    The LLM receives the structured graph data and generates a factual, grounded response — not a probabilistic approximation.
+  </Step>
+
+  <Step title="Optional: update">
+    If the agent needs to record new information, it calls `executeSparql` with an `INSERT DATA` statement (on a writable source) to persist the new facts.
+  </Step>
+</Steps>
+
+## Designing agents for reliability
+
+<AccordionGroup>
+  <Accordion title="Always provide a system prompt with schema context">
+    Give the agent a system prompt that describes the vocabulary it should use. Use the `discoverSchema` tool at startup to populate this context dynamically:
+
+    ```typescript
+    const schema = await sdk.worlds.sparql(
+      "my-world-id",
+      `SELECT DISTINCT ?type WHERE { ?s a ?type }`,
+    );
+
+    // Include schema info in the system prompt
+    const systemPrompt = `You have access to a knowledge base with the following types: ${...}`;
+    ```
+  </Accordion>
+
+  <Accordion title="Use read-only sources by default">
+    Only grant write access to sources where the agent should be able to update the graph. This prevents accidental or adversarial modifications.
+
+    ```typescript
+    sources: [
+      { id: "reference-data" },              // read-only
+      { id: "agent-workspace", write: true }, // writable
+    ]
+    ```
+  </Accordion>
+
+  <Accordion title="Set maxSteps to control reasoning depth">
+    For complex multi-step queries, set `maxSteps` appropriately. Each tool call counts as one step. A query that requires entity resolution + data retrieval + verification needs at least 3 steps.
+
+    ```typescript
+    const { text } = await generateText({
+      model: openai("gpt-4o"),
+      tools: createTools({ sdk, sources }),
+      maxSteps: 10,  // Allow up to 10 tool calls
+      prompt: "...",
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="Validate writes with SHACL shapes">
+    Pass SHACL shapes (Turtle format) to `createTools` to validate all INSERT operations before they reach the graph:
+
+    ```typescript
+    const shacl = await readFile("shapes.ttl", "utf-8");
+
+    createTools({
+      sdk,
+      sources: [{ id: "my-world-id", write: true }],
+      shacl,
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Congratulations
+
+You have completed the Worlds Academy. You now have the full stack:
+
+- You understand **world memory fundamentals** and why stateful environments outperform RAG for structured knowledge.
+- You can design **symbolic graph architectures** using RDF triples, URIs, and Turtle syntax.
+- You can perform **logical reasoning with SPARQL** — querying, inserting, deleting, and traversing graph data.
+- You can implement **neuro-symbolic agent integration** using `worlds-ai-sdk` and the Vercel AI SDK.
+
+<CardGroup cols={2}>
+  <Card title="Knowledge graphs guide" icon="diagram-nested" href="/guides/knowledge-graphs">
+    Go deeper on graph design patterns and ontology engineering.
+  </Card>
+  <Card title="Semantic search guide" icon="eye" href="/guides/semantic-search">
+    Learn how hybrid vector + SPARQL search works under the hood.
+  </Card>
+  <Card title="API reference" icon="book-open" href="/reference">
+    Browse the complete Worlds API reference.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Import data, run queries, and manage worlds from the command line.
+  </Card>
+</CardGroup>

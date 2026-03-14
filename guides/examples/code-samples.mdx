@@ -1,0 +1,270 @@
+---
+title: "Code samples"
+description: "Working TypeScript and Deno code samples for common Worlds integration patterns."
+---
+
+The following samples are self-contained Deno scripts you can run directly after configuring your environment variables.
+
+## Setup
+
+```bash
+deno add jsr:@wazoo/worlds-sdk
+```
+
+Set environment variables:
+
+```bash
+export WORLDS_API_KEY="your-api-key"
+export WORLDS_BASE_URL="http://localhost:8000"
+```
+
+## Initialize the SDK
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: Deno.env.get("WORLDS_BASE_URL") ?? "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+```
+
+## World management
+
+```typescript
+// Create a world
+const world = await sdk.worlds.create({
+  slug: "my-knowledge-base",
+  label: "My Knowledge Base",
+  description: "A graph of people, projects, and relationships.",
+});
+
+console.log("Created world:", world.id);
+
+// List all worlds
+const worlds = await sdk.worlds.list();
+console.log(`You have ${worlds.length} worlds.`);
+
+// Get a specific world
+const found = await sdk.worlds.get(world.id);
+console.log("World label:", found?.label);
+
+// Update a world
+await sdk.worlds.update(world.id, {
+  label: "Updated Knowledge Base",
+});
+
+// Delete a world (soft delete)
+await sdk.worlds.delete(world.id);
+```
+
+## Import and export data
+
+```typescript
+const turtle = `
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/> .
+
+ex:ethan
+    a schema:Person ;
+    schema:givenName "Ethan" ;
+    schema:worksFor ex:acme .
+
+ex:acme
+    a schema:Organization ;
+    schema:name "Acme Corp" .
+`;
+
+// Import Turtle data
+await sdk.worlds.import("my-world", turtle, { format: "turtle" });
+
+// Export as Turtle
+const buffer = await sdk.worlds.export("my-world", { format: "turtle" });
+const text = new TextDecoder().decode(buffer);
+console.log(text);
+```
+
+## SPARQL queries
+
+### SELECT
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?person ?name WHERE {
+    ?person a schema:Person ;
+            schema:givenName ?name .
+  }
+  ORDER BY ?name
+`);
+
+if (result && "results" in result) {
+  for (const binding of result.results.bindings) {
+    console.log(binding.name.value);
+  }
+}
+```
+
+### INSERT
+
+```typescript
+await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  INSERT DATA {
+    ex:alice
+        a schema:Person ;
+        schema:givenName "Alice" ;
+        schema:worksFor ex:acme .
+  }
+`);
+```
+
+### DELETE and update
+
+```typescript
+// Remove all facts about a specific predicate for an entity
+await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  DELETE WHERE {
+    ex:alice schema:jobTitle ?title .
+  }
+`);
+
+// Conditional update: change working assignment
+await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  DELETE {
+    ex:ethan schema:workingOn ex:project-apollo .
+  }
+  INSERT {
+    ex:ethan schema:workingOn ex:project-hermes .
+  }
+  WHERE {
+    ex:ethan schema:workingOn ex:project-apollo .
+  }
+`);
+```
+
+### ASK
+
+```typescript
+const exists = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  ASK {
+    ex:ethan schema:worksFor ex:acme .
+  }
+`);
+
+if (exists && "boolean" in exists) {
+  console.log("Ethan works for Acme:", exists.boolean);
+}
+```
+
+## Semantic search
+
+```typescript
+// Basic search
+const results = await sdk.worlds.search("my-world", "find people related to ethan", {
+  limit: 10,
+});
+
+for (const r of results) {
+  console.log(`${r.subject} ${r.predicate} ${r.object} (score: ${r.score.toFixed(4)})`);
+}
+
+// Search with graph filters
+const filtered = await sdk.worlds.search(
+  "my-world",
+  "find people related to ethan",
+  {
+    limit: 10,
+    subjects: ["http://example.com/ethan"],
+    predicates: ["http://schema.org/relatedTo"],
+  }
+);
+
+// Filter by entity type
+const people = await sdk.worlds.search("my-world", "software engineers", {
+  limit: 20,
+  types: ["http://schema.org/Person"],
+});
+```
+
+## Monitoring logs
+
+```typescript
+// List recent logs
+const logs = await sdk.worlds.listLogs("my-world", {
+  pageSize: 50,
+});
+
+for (const log of logs) {
+  const ts = new Date(log.timestamp).toISOString();
+  console.log(`[${ts}] [${log.level.toUpperCase()}] ${log.message}`);
+  if (log.metadata) console.log("  Metadata:", log.metadata);
+}
+
+// Get only errors
+const errors = await sdk.worlds.listLogs("my-world", { level: "error" });
+```
+
+## AI agent integration with Vercel AI SDK
+
+The following example wires Worlds into an AI agent as tools, enabling grounded, graph-backed responses:
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+import { generateText, tool } from "ai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { z } from "zod";
+
+const sdk = createWorldsSdk({
+  baseUrl: Deno.env.get("WORLDS_BASE_URL")!,
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+const openrouter = createOpenRouter({
+  apiKey: Deno.env.get("OPENROUTER_API_KEY")!,
+});
+
+const WORLD_ID = "my-world";
+
+const { text } = await generateText({
+  model: openrouter("openai/gpt-4o-mini"),
+  system: `You are a knowledgeable assistant with access to a knowledge graph.
+  Use the search tool to find relevant facts, then use sparql to get precise details.
+  Always ground your answers in the graph data.`,
+  prompt: "Who does Ethan work for and what projects is he on?",
+  tools: {
+    search: tool({
+      description: "Semantic search over the knowledge graph",
+      parameters: z.object({
+        query: z.string().describe("Natural language search query"),
+        limit: z.number().optional().default(10),
+      }),
+      execute: async ({ query, limit }) =>
+        sdk.worlds.search(WORLD_ID, query, { limit }),
+    }),
+    sparql: tool({
+      description: "Execute a SPARQL SELECT query",
+      parameters: z.object({
+        query: z.string().describe("SPARQL SELECT query"),
+      }),
+      execute: async ({ query }) =>
+        sdk.worlds.sparql(WORLD_ID, query),
+    }),
+  },
+  maxSteps: 5,
+});
+
+console.log(text);
+```

@@ -1,0 +1,245 @@
+---
+title: "Production deployment"
+description: "Self-host the Worlds server with Deno, configure Turso for storage, and connect embedding providers."
+---
+
+The Worlds server is a [Deno](https://deno.com) application that uses LibSQL/Turso for storage and supports multiple embedding backends. You can run it locally for development or deploy it to any Deno-compatible host for production.
+
+## Prerequisites
+
+- [Deno](https://deno.com) 2.x or later
+- A LibSQL-compatible database (local SQLite file or Turso)
+- An embedding provider (OpenRouter or Ollama)
+
+## Installation
+
+Clone the repository and navigate to the project root:
+
+```bash
+git clone https://github.com/wazootech/worlds.git
+cd worlds
+```
+
+## Environment configuration
+
+Copy the example environment file and fill in your values:
+
+```bash
+cp packages/server/.env.example packages/server/.env
+```
+
+The full set of environment variables:
+
+```bash
+# Required: API key for authenticating SDK and API requests
+WORLDS_API_KEY="your-secret-api-key"
+
+# Required: Base directory for local file storage
+WORLDS_BASE_DIR="./worlds"
+
+# Required: LibSQL connection URL
+# Local SQLite (development)
+LIBSQL_URL="file:./worlds.db"
+# Turso (production)
+# LIBSQL_URL="libsql://your-db.turso.io"
+
+# Required for Turso: authentication token
+LIBSQL_AUTH_TOKEN=""
+
+# Production: Turso Management API token
+# TURSO_API_TOKEN=""
+# TURSO_ORG="your-org-name"
+
+# Embeddings: OpenRouter (recommended for production)
+# OPENROUTER_API_KEY=""
+# OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+# WORLDS_EMBEDDINGS_DIMENSIONS="1536"
+
+# Embeddings: Ollama (local / air-gapped)
+# OLLAMA_BASE_URL="http://localhost:11434"
+# OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+```
+
+## Running the server
+
+<Tabs>
+  <Tab title="Development">
+    ```bash
+    deno serve -A --env=./packages/server/.env ./packages/server/main.ts
+    ```
+
+    The server starts at `http://localhost:8000` by default.
+  </Tab>
+
+  <Tab title="Production">
+    ```bash
+    deno serve -A --env=./packages/server/.env --port=8000 ./packages/server/main.ts
+    ```
+
+    For production, run behind a reverse proxy (nginx, Caddy) with TLS termination.
+  </Tab>
+
+  <Tab title="Custom port">
+    ```bash
+    deno serve -A --env=./packages/server/.env --port=3001 ./packages/server/main.ts
+    ```
+  </Tab>
+</Tabs>
+
+## Embedding providers
+
+The server supports two embedding backends. Configure one via environment variables.
+
+### OpenRouter (recommended for production)
+
+OpenRouter proxies embedding models from OpenAI, Cohere, and others.
+
+<Steps>
+  <Step title="Get an API key">
+    Visit [openrouter.ai/keys](https://openrouter.ai/keys) and generate a new key.
+  </Step>
+
+  <Step title="Configure the environment">
+    ```bash
+    OPENROUTER_API_KEY="sk-or-..."
+    OPENROUTER_EMBEDDINGS_MODEL="openai/text-embedding-3-small"
+    WORLDS_EMBEDDINGS_DIMENSIONS="1536"
+    ```
+
+    The `WORLDS_EMBEDDINGS_DIMENSIONS` value must match the output dimensions of the chosen model. For `text-embedding-3-small`, use `1536`.
+  </Step>
+
+  <Step title="Start the server">
+    The server automatically uses `OpenRouterEmbeddings` when `OPENROUTER_API_KEY` is present.
+  </Step>
+</Steps>
+
+### Ollama (local / air-gapped)
+
+Ollama runs embedding models locally. Useful for development or environments without external network access.
+
+<Steps>
+  <Step title="Install and start Ollama">
+    ```bash
+    # macOS / Linux
+    curl -fsSL https://ollama.com/install.sh | sh
+    ollama serve &
+
+    # Pull an embedding model
+    ollama pull nomic-embed-text
+    ```
+  </Step>
+
+  <Step title="Configure the environment">
+    ```bash
+    OLLAMA_BASE_URL="http://localhost:11434"
+    OLLAMA_EMBEDDINGS_MODEL="nomic-embed-text"
+    WORLDS_EMBEDDINGS_DIMENSIONS="768"
+    ```
+  </Step>
+
+  <Step title="Start the server">
+    Ollama embeddings are used when `OLLAMA_BASE_URL` is set and `OPENROUTER_API_KEY` is absent.
+  </Step>
+</Steps>
+
+## Database configuration
+
+### Local SQLite (development)
+
+No additional setup required. The server creates `worlds.db` automatically in the working directory:
+
+```bash
+LIBSQL_URL="file:./worlds.db"
+```
+
+### Turso (production)
+
+Turso is a distributed LibSQL service with per-database branching and global replicas.
+
+<Steps>
+  <Step title="Create a Turso account and database">
+    ```bash
+    # Install the Turso CLI
+    curl -sSfL https://get.tur.so/install.sh | bash
+
+    # Authenticate
+    turso auth login
+
+    # Create a database
+    turso db create worlds-production
+    ```
+  </Step>
+
+  <Step title="Retrieve connection credentials">
+    ```bash
+    # Get the database URL
+    turso db show worlds-production --url
+
+    # Create an auth token
+    turso db tokens create worlds-production
+    ```
+  </Step>
+
+  <Step title="Configure the environment">
+    ```bash
+    LIBSQL_URL="libsql://worlds-production-<org>.turso.io"
+    LIBSQL_AUTH_TOKEN="eyJ..."
+
+    # For per-world database provisioning
+    TURSO_API_TOKEN="your-turso-management-api-token"
+    TURSO_ORG="your-org-name"
+    ```
+  </Step>
+</Steps>
+
+## Security
+
+<Warning>
+The `WORLDS_API_KEY` is the only authentication mechanism for the API. Use a strong random value in production.
+
+```bash
+openssl rand -hex 32
+```
+
+Do not expose the server directly to the internet without TLS. Always terminate TLS at a reverse proxy.
+</Warning>
+
+All API routes check the `Authorization: Bearer <api-key>` header. Requests without a valid key receive `401 Unauthorized`.
+
+## Provisioning infrastructure at scale
+
+For multi-tenant deployments where each organization gets its own world databases:
+
+<Steps>
+  <Step title="Configure Turso organization">
+    Set `TURSO_API_TOKEN` and `TURSO_ORG` to enable the database manager to automatically provision per-world Turso databases.
+  </Step>
+
+  <Step title="Create worlds via the API">
+    ```typescript
+    const world = await sdk.worlds.create({
+      slug: "customer-acme",
+      label: "Acme Corp Knowledge Base",
+      description: "Internal knowledge graph for Acme Corp",
+    });
+    ```
+
+    The server automatically provisions a new Turso database for each world.
+  </Step>
+
+  <Step title="Monitor world operations">
+    Use the logs endpoint to audit activity per world. See the [Monitoring guide](/guides/monitoring) for details.
+  </Step>
+</Steps>
+
+## Health check
+
+Verify the server is running:
+
+```bash
+curl http://localhost:8000/worlds \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+A successful response returns a JSON array of worlds (empty `[]` for a fresh installation).

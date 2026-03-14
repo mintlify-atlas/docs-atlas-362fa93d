@@ -1,0 +1,98 @@
+---
+title: "Worlds Academy"
+description: "Master stateful AI memory and neuro-symbolic world models — from fundamentals to production agents."
+---
+
+Welcome to the Worlds Academy. This curriculum guides you from the fundamentals of world models to building advanced, stateful AI agents that can reason over structured knowledge.
+
+<Note>
+  **Core objective**
+
+  By the end of this learning path, you will understand how to bridge Large Language Models with structured knowledge graphs, giving your agents persistent, stateful memory that survives across sessions and scales to complex reasoning tasks.
+</Note>
+
+## Who is this for?
+
+The Academy is for developers who want to move beyond basic retrieval-augmented generation (RAG) and build agents with genuine persistent memory. You should be comfortable with TypeScript and have a basic understanding of how LLMs work.
+
+No prior knowledge of RDF, SPARQL, or graph databases is required — the curriculum starts from first principles.
+
+## Learning path
+
+Follow these modules in order. Each one builds on the previous.
+
+<Steps>
+  <Step title="World memory fundamentals">
+    Understand what agent memory is, why it matters, and how the Worlds Platform models memory as a persistent, stateful environment. Learn the distinction between retrieval (RAG) and true world memory.
+
+    [Start module](/academy/memory)
+  </Step>
+
+  <Step title="Symbolic graph architecture">
+    Learn how every piece of knowledge in a World is stored as a Subject–Predicate–Object triplet. Master the RDF data model, URI-based identity, and the Turtle serialization format through real examples from the solar system dataset.
+
+    [Start module](/academy/graphs)
+  </Step>
+
+  <Step title="Logical reasoning with SPARQL">
+    Master the W3C standard query language for RDF graphs. Learn to write SELECT, INSERT, DELETE, ASK, and CONSTRUCT queries and understand when SPARQL outperforms vector search.
+
+    [Start module](/academy/sparql)
+  </Step>
+
+  <Step title="Neuro-symbolic agent integration">
+    Connect an AI agent to its world memory using the `worlds-ai-sdk`. Build agents that can read from and write to a knowledge graph using tool-calling, and understand the full neuro-symbolic reasoning loop.
+
+    [Start module](/academy/agents)
+  </Step>
+</Steps>
+
+## What you will build
+
+By the end of the Academy, you will have the skills to build agents like this:
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+import { createTools } from "@wazoo/worlds-ai-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+const { text } = await generateText({
+  model: openai("gpt-4o"),
+  tools: createTools({
+    sdk,
+    sources: [{ id: "my-knowledge-base" }],
+  }),
+  prompt: "Find all team members and summarize their roles.",
+});
+```
+
+The agent uses SPARQL under the hood to query a structured knowledge graph and return precise, factual answers — not probabilistic document retrieval.
+
+## Additional resources
+
+Once you complete the core modules, explore these guides to deepen your expertise.
+
+<CardGroup cols={2}>
+  <Card
+    title="Knowledge graphs"
+    icon="diagram-nested"
+    href="/guides/knowledge-graphs"
+  >
+    Master the neuro-symbolic infrastructure of item graphs.
+  </Card>
+  <Card title="Semantic search" icon="eye" href="/guides/semantic-search">
+    Implement contextual retrieval across the global item store.
+  </Card>
+  <Card title="API reference" icon="book-open" href="/reference">
+    Browse the functional endpoints of the Worlds API.
+  </Card>
+  <Card title="CLI reference" icon="terminal" href="/reference/cli">
+    Manage worlds, import data, and run queries from the command line.
+  </Card>
+</CardGroup>

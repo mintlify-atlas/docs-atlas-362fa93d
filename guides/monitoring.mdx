@@ -1,0 +1,184 @@
+---
+title: "Monitoring"
+description: "Access world-scoped logs to audit agent operations, debug queries, and track data changes."
+---
+
+The Worlds Platform maintains an internal logging system that tracks world-specific events and provides an audit trail for agent actions. Each world has its own log store, scoped to that world's database.
+
+## Retrieving logs with the SDK
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+// Get the 20 most recent logs
+const logs = await sdk.worlds.listLogs("my-world");
+
+// Paginate
+const page2 = await sdk.worlds.listLogs("my-world", {
+  page: 2,
+  pageSize: 50,
+});
+
+// Filter by log level
+const errors = await sdk.worlds.listLogs("my-world", {
+  level: "error",
+});
+```
+
+## Log structure
+
+Each log entry conforms to the `Log` type exported from the SDK:
+
+```typescript
+interface Log {
+  id: string;                              // ULID
+  worldId: string;                         // ID of the world
+  timestamp: number;                       // Unix epoch milliseconds
+  level: "info" | "warn" | "error" | "debug";
+  message: string;                         // Human-readable event description
+  metadata: Record<string, unknown> | null; // Event-specific payload
+}
+```
+
+### Example log entries
+
+```json
+[
+  {
+    "id": "01HWZQ8F2K3N4T5G6R7S8V9X0Y",
+    "worldId": "my-world",
+    "timestamp": 1715000000000,
+    "level": "info",
+    "message": "World data imported",
+    "metadata": { "triples": 342 }
+  },
+  {
+    "id": "01HWZQ8F2K3N4T5G6R7S8V9X0Z",
+    "worldId": "my-world",
+    "timestamp": 1715000010000,
+    "level": "info",
+    "message": "SPARQL query",
+    "metadata": {
+      "query": "SELECT ?s ?p ?o WHERE { ?s ?p ?o . } LIMIT 10"
+    }
+  },
+  {
+    "id": "01HWZQ8F2K3N4T5G6R7S8V9X1A",
+    "worldId": "my-world",
+    "timestamp": 1715000020000,
+    "level": "info",
+    "message": "Semantic search executed",
+    "metadata": {
+      "query": "find people related to project hermes",
+      "subjects": ["http://example.com/ethan"],
+      "predicates": null,
+      "types": null
+    }
+  }
+]
+```
+
+## Log levels
+
+| Level | Meaning |
+| :--- | :--- |
+| `info` | Normal operational events (imports, queries, searches) |
+| `warn` | Recoverable issues that may need attention |
+| `error` | Failures that prevented an operation from completing |
+| `debug` | Detailed diagnostic information for development |
+
+## Automatic log triggers
+
+The platform automatically creates log entries for the following events:
+
+| Event | Level | Metadata |
+| :--- | :--- | :--- |
+| World created | `info` | World label |
+| World updated | `info` | Changed fields |
+| World deleted | `info` | Recorded before deletion to maintain the audit trail |
+| SPARQL query executed | `info` | Query string (truncated to 1000 chars) |
+| SPARQL update executed | `info` | Update string (truncated to 1000 chars) |
+| Data imported | `info` | Triple count |
+| Semantic search executed | `info` | Query string, subject/predicate/type filters |
+
+## Polling for recent activity
+
+To build a live monitoring view, poll the logs endpoint at an interval:
+
+```typescript
+async function watchLogs(worldId: string, intervalMs = 5000) {
+  let lastTimestamp = Date.now();
+
+  setInterval(async () => {
+    const logs = await sdk.worlds.listLogs(worldId, {
+      pageSize: 100,
+    });
+
+    const newLogs = logs.filter((log) => log.timestamp > lastTimestamp);
+
+    for (const log of newLogs) {
+      console.log(`[${log.level.toUpperCase()}] ${log.message}`, log.metadata);
+    }
+
+    if (newLogs.length > 0) {
+      lastTimestamp = Math.max(...newLogs.map((l) => l.timestamp));
+    }
+  }, intervalMs);
+}
+
+awaitLogs("my-world");
+```
+
+## Using the REST API
+
+```bash
+# Get latest 20 logs
+curl http://localhost:8000/worlds/my-world/logs \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+
+# Filter by level
+curl "http://localhost:8000/worlds/my-world/logs?level=error" \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+
+# Paginate
+curl "http://localhost:8000/worlds/my-world/logs?page=2&pageSize=50" \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+## Debugging failed operations
+
+<AccordionGroup>
+  <Accordion title="Import failures">
+    Import errors are recorded in the log with level `error` and the error message in the metadata. Common causes:
+    - Invalid RDF syntax in the uploaded data
+    - Mismatched content type (e.g., sending N-Triples with `text/turtle` Content-Type)
+    - Blank nodes with invalid syntax
+
+    Check the log for the specific error:
+
+    ```typescript
+    const errors = await sdk.worlds.listLogs("my-world", { level: "error" });
+    errors.forEach((log) => console.log(log.message, log.metadata));
+    ```
+  </Accordion>
+
+  <Accordion title="SPARQL query errors">
+    Malformed SPARQL queries return a `400 Bad Request` with an error message. The query is not logged when it fails to parse. Successful queries are logged with the query string (truncated to 1000 characters).
+  </Accordion>
+
+  <Accordion title="Search returning no results">
+    If semantic search returns zero results:
+    1. Verify the world contains data via `sdk.worlds.export()`.
+    2. Check that embeddings are configured correctly — look for errors in the server logs.
+    3. Try a broader query without `subjects` or `predicates` filters.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+Log entries are stored in each world's own LibSQL database. Deleting a world permanently removes its logs. The deletion event itself is written to the log before the database is dropped.
+</Note>

@@ -1,0 +1,215 @@
+---
+title: "Quickstart"
+description: "Integrate Worlds into your AI application in minutes."
+---
+
+This guide walks you through installing the SDK, connecting to a Worlds server, creating your first world, and running a SPARQL query.
+
+## Prerequisites
+
+- A running Worlds server (`http://localhost:8000`) or access to a hosted instance
+- An API key (see [Authentication](/overview/getting-started/authentication))
+- [Deno](https://deno.com/) or another supported runtime
+
+## Install the SDK
+
+Add the Worlds SDK to your project.
+
+<CodeGroup>
+
+```bash deno
+deno add jsr:@wazoo/worlds-sdk
+```
+
+```bash npm
+npx jsr add @wazoo/worlds-sdk
+```
+
+```bash pnpm
+pnpm i jsr:@wazoo/worlds-sdk
+```
+
+```bash yarn
+yarn add jsr:@wazoo/worlds-sdk
+```
+
+```bash bun
+bunx jsr add @wazoo/worlds-sdk
+```
+
+</CodeGroup>
+
+## SDK quickstart
+
+<Steps>
+  <Step title="Initialize the client">
+    Create a `WorldsSdk` instance with your server URL and API key.
+
+    ```typescript
+    import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+    const sdk = new WorldsSdk({
+      baseUrl: "http://localhost:8000",
+      apiKey: "your-api-key",
+    });
+    ```
+
+    <Tip>For cloud deployments, replace `http://localhost:8000` with your hosted API URL (e.g., `https://api.wazoo.dev`).</Tip>
+  </Step>
+
+  <Step title="Create a world">
+    A world is an isolated knowledge graph container. Create one with a unique slug and label.
+
+    ```typescript
+    const world = await sdk.worlds.create({
+      slug: "my-first-world",
+      label: "My First World",
+      description: "A test knowledge base for exploring Worlds.",
+    });
+
+    console.log(world.id); // "my-first-world"
+    ```
+  </Step>
+
+  <Step title="Add knowledge">
+    Insert RDF triples into your world using SPARQL `INSERT DATA`.
+
+    ```typescript
+    const worldId = "my-first-world";
+
+    await sdk.worlds.sparql(
+      worldId,
+      `
+      INSERT DATA {
+        <http://example.com/ethan> <http://schema.org/relatedTo> <http://example.com/gregory> .
+        <http://example.com/gregory> <http://schema.org/givenName> "Gregory" .
+      }
+    `,
+    );
+    ```
+
+    Alternatively, import existing RDF data directly:
+
+    ```typescript
+    await sdk.worlds.import(
+      worldId,
+      `
+      <#memo> <http://purl.org/dc/terms/description> "The secret ingredient is always more compute." .
+      `,
+      { format: "turtle" },
+    );
+    ```
+  </Step>
+
+  <Step title="Query your world">
+    Use SPARQL `SELECT` to reason over the facts stored in your world.
+
+    ```typescript
+    const result = await sdk.worlds.sparql(
+      worldId,
+      `
+      SELECT ?name WHERE {
+        <http://example.com/ethan> <http://schema.org/relatedTo> ?person .
+        ?person <http://schema.org/givenName> ?name .
+      }
+    `,
+    );
+
+    console.log(result);
+    // { results: { bindings: [{ name: { value: "Gregory" } }] } }
+    ```
+  </Step>
+
+  <Step title="Search with natural language">
+    The hybrid search endpoint combines vector similarity and keyword search.
+
+    ```typescript
+    const hits = await sdk.worlds.search(
+      worldId,
+      "people related to Ethan",
+      { limit: 10 },
+    );
+
+    console.log(hits);
+    ```
+  </Step>
+</Steps>
+
+## CLI quickstart
+
+The CLI lets you manage worlds directly from your terminal.
+
+### Install the CLI
+
+```bash
+deno install -A --name worlds jsr:@wazoo/worlds-cli
+```
+
+### Basic usage
+
+```bash
+# Create a new world
+worlds create --label "My First World"
+
+# List all worlds
+worlds list
+
+# Run a SPARQL query
+worlds sparql "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10"
+```
+
+## Full end-to-end example
+
+Here is a complete working script that creates a world, adds knowledge, and queries it:
+
+```typescript
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+const worldId = "my-knowledge-base";
+
+// Add some knowledge (triples) to your world.
+await sdk.worlds.sparql(
+  worldId,
+  `
+  INSERT DATA {
+    <http://example.com/ethan> <http://schema.org/relatedTo> <http://example.com/gregory> .
+    <http://example.com/gregory> <http://schema.org/givenName> "Gregory" .
+  }
+`,
+);
+
+// Reason over your world using SPARQL.
+const result = await sdk.worlds.sparql(
+  worldId,
+  `
+  SELECT ?name WHERE {
+    <http://example.com/ethan> <http://schema.org/relatedTo> ?person .
+    ?person <http://schema.org/givenName> ?name .
+  }
+`,
+);
+
+console.log(result);
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="key" href="/overview/getting-started/authentication">
+    Learn how API keys work and how to secure your deployment.
+  </Card>
+  <Card title="AI agent integration" icon="robot" href="/overview/getting-started/agent-integration">
+    Connect Worlds to LLM agents with the AI SDK.
+  </Card>
+  <Card title="Features" icon="star" href="/overview/features">
+    Explore SPARQL, hybrid search, import/export, and more.
+  </Card>
+  <Card title="API reference" icon="code" href="/reference/api">
+    Full reference for every endpoint and SDK method.
+  </Card>
+</CardGroup>

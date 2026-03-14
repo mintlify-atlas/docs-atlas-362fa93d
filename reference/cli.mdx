@@ -1,0 +1,382 @@
+---
+title: "CLI reference"
+description: "Complete reference for the Worlds CLI — install, commands, flags, and environment variables."
+---
+
+The Worlds CLI lets you manage worlds, import RDF data, run SPARQL queries, and start an AI chat session — all from your terminal.
+
+## Installation
+
+Install via Deno from the JSR registry:
+
+```bash
+deno install -A --name worlds jsr:@wazoo/worlds-cli
+```
+
+Verify the installation:
+
+```bash
+worlds --help
+```
+
+## Modes
+
+The CLI operates in two modes depending on the environment variables present:
+
+| Mode | When | Description |
+| :--- | :--- | :---------- |
+| **Remote** | `WORLDS_BASE_URL` and `WORLDS_API_KEY` are set | Sends requests to a remote Worlds API server. |
+| **Local** | Neither variable is set | Starts an in-process Worlds server backed by a local libSQL database. |
+
+In local mode, a temporary API key is generated automatically and a libSQL database is created at `./worlds.db` by default.
+
+## Global environment variables
+
+| Variable | Mode | Description |
+| :------- | :--- | :---------- |
+| `WORLDS_API_KEY` | Remote | API key for the remote server. |
+| `WORLDS_BASE_URL` | Remote | Base URL of the remote server (e.g. `https://api.wazoo.dev`). |
+| `LIBSQL_URL` | Local | libSQL database URL (default: `file:./worlds.db`). |
+| `LIBSQL_AUTH_TOKEN` | Local | Auth token for a remote libSQL/Turso instance. |
+| `OPENROUTER_API_KEY` | Chat | Required for the `chat` command. |
+| `OPENROUTER_MODEL` | Chat | Model to use for chat (default: `google/gemini-2.0-flash-001`). |
+
+---
+
+## Commands
+
+### `worlds create`
+
+Create a new world.
+
+```bash
+worlds create --label <label> [--slug <slug>] [--description <desc>]
+```
+
+**Flags**
+
+| Flag | Alias | Required | Description |
+| :--- | :---- | :------- | :---------- |
+| `--label` | `-l` | Yes | Display name for the world. |
+| `--slug` | `-s` | No | URL-safe identifier. Auto-generated from `--label` if omitted. |
+| `--description` | `-d` | No | Optional description. |
+
+**Example**
+
+```bash
+worlds create --label "Product Catalog" --slug "product-catalog" --description "Product ontology"
+```
+
+**Output**
+
+```json
+{
+  "id": "01JQKXYZ...",
+  "slug": "product-catalog",
+  "label": "Product Catalog",
+  "description": "Product ontology",
+  "createdAt": 1741900000000,
+  "updatedAt": 1741900000000,
+  "deletedAt": null
+}
+```
+
+---
+
+### `worlds list`
+
+List all worlds.
+
+```bash
+worlds list [--page <n>] [--pageSize <n>]
+```
+
+**Flags**
+
+| Flag | Alias | Default | Description |
+| :--- | :---- | :------ | :---------- |
+| `--page` | `-p` | `1` | Page number. |
+| `--pageSize` | `-s` | `20` | Results per page. |
+
+**Example**
+
+```bash
+worlds list --pageSize 5
+```
+
+**Output** — JSON array of `World` objects (same shape as `worlds create`).
+
+---
+
+### `worlds get`
+
+Get a world by ID or slug.
+
+```bash
+worlds get <worldId>
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+
+**Example**
+
+```bash
+worlds get product-catalog
+```
+
+---
+
+### `worlds update`
+
+Update a world's metadata.
+
+```bash
+worlds update <worldId> [--slug <slug>] [--label <label>] [--description <desc>]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+
+**Flags**
+
+| Flag | Alias | Description |
+| :--- | :---- | :---------- |
+| `--slug` | `-s` | New slug. |
+| `--label` | `-l` | New display name. |
+| `--description` | `-d` | New description. |
+
+**Example**
+
+```bash
+worlds update product-catalog --label "Product Ontology v2"
+```
+
+**Output**
+
+```text
+Updated world product-catalog
+```
+
+---
+
+### `worlds delete`
+
+Soft-delete a world.
+
+```bash
+worlds delete <worldId>
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+
+**Example**
+
+```bash
+worlds delete product-catalog
+```
+
+**Output**
+
+```text
+Deleted world product-catalog
+```
+
+---
+
+### `worlds sparql`
+
+Execute a SPARQL query or update against a world.
+
+```bash
+worlds sparql <worldId> <query_or_file_path>
+```
+
+The second argument is either a SPARQL string or a path to a `.sparql` / `.rq` file. The CLI attempts to read it as a file first; if that fails, it treats the argument as a literal query string.
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+| `query_or_file_path` | Yes | SPARQL query string or path to a file containing a query. |
+
+**Examples**
+
+```bash
+# Inline query
+worlds sparql my-world 'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 5'
+
+# From a file
+worlds sparql my-world ./queries/find-entities.rq
+```
+
+**Output** — JSON SPARQL results object.
+
+```json
+{
+  "head": { "vars": ["s", "p", "o"], "link": null },
+  "results": {
+    "bindings": [
+      {
+        "s": { "type": "uri", "value": "https://example.org/Alice" },
+        "p": { "type": "uri", "value": "http://schema.org/name" },
+        "o": { "type": "literal", "value": "Alice" }
+      }
+    ]
+  }
+}
+```
+
+---
+
+### `worlds search`
+
+Run a semantic + full-text search against a world.
+
+```bash
+worlds search <worldId> <query> [--limit <n>] [--subjects <iri>] [--predicates <iri>]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+| `query` | Yes | Natural language or keyword search query. |
+
+**Flags**
+
+| Flag | Alias | Default | Description |
+| :--- | :---- | :------ | :---------- |
+| `--limit` | `-l` | `20` | Maximum number of results. |
+| `--subjects` | `-s` | — | Filter to triples with this subject IRI (repeatable). |
+| `--predicates` | `-p` | — | Filter to triples with this predicate IRI (repeatable). |
+
+**Example**
+
+```bash
+worlds search my-world "artificial intelligence" --limit 10
+```
+
+**Output** — JSON array of `TripleSearchResult` objects.
+
+---
+
+### `worlds import`
+
+Import RDF data from a local file into a world.
+
+```bash
+worlds import <worldId> <file_path> [--format <format>]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+| `file_path` | Yes | Path to the RDF file to import. |
+
+**Flags**
+
+| Flag | Alias | Description |
+| :--- | :---- | :---------- |
+| `--format` | `-f` | RDF format: `turtle`, `n-quads`, `n-triples`, or `n3`. Inferred from file extension when omitted. |
+
+**Examples**
+
+```bash
+# Turtle file
+worlds import my-world ./data.ttl --format turtle
+
+# N-Quads file
+worlds import my-world ./data.nq
+```
+
+**Output**
+
+```text
+Imported data into world my-world
+```
+
+---
+
+### `worlds export`
+
+Export a world's RDF graph to stdout.
+
+```bash
+worlds export <worldId> [--format <format>]
+```
+
+**Arguments**
+
+| Argument | Required | Description |
+| :------- | :------- | :---------- |
+| `worldId` | Yes | World ID (ULID) or slug. |
+
+**Flags**
+
+| Flag | Alias | Default | Description |
+| :--- | :---- | :------ | :---------- |
+| `--format` | `-f` | `n-quads` | Serialization format: `turtle`, `n-quads`, `n-triples`, or `n3`. |
+
+**Example**
+
+```bash
+# Export as Turtle and write to a file
+worlds export my-world --format turtle > backup.ttl
+```
+
+**Output** — Raw RDF bytes written to stdout.
+
+---
+
+### `worlds chat`
+
+Start an interactive AI chat session against a world. The assistant has access to all neuro-symbolic tools (search, SPARQL, schema discovery, etc.) and can answer questions about or modify the knowledge graph.
+
+```bash
+worlds chat --worldId <id> [--write] [--userIri <iri>]
+```
+
+**Flags**
+
+| Flag | Alias | Required | Description |
+| :--- | :---- | :------- | :---------- |
+| `--worldId` | `-w` | Yes | ID of the world to chat about. |
+| `--write` | — | No | Enable SPARQL write operations. Disabled by default. |
+| `--userIri` | `-u` | No | IRI identifying the current user (used for provenance). |
+
+**Required environment variables**
+
+| Variable | Description |
+| :------- | :---------- |
+| `OPENROUTER_API_KEY` | OpenRouter API key for the LLM. |
+| `OPENROUTER_MODEL` | Model ID (default: `google/gemini-2.0-flash-001`). |
+
+**Example**
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+export OPENROUTER_MODEL="google/gemini-2.0-flash-001"
+
+worlds chat --worldId my-world --write
+```
+
+Type `exit` to quit the session.
+
+<Note>
+  In read-only mode (without `--write`), the assistant can run SELECT, ASK, CONSTRUCT, and DESCRIBE queries but not INSERT or DELETE updates.
+</Note>

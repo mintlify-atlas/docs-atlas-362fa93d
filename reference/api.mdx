@@ -1,0 +1,632 @@
+---
+title: "API reference"
+description: "Complete REST API reference for the Worlds Platform. Every endpoint, parameter, request body, response schema, and error code."
+---
+
+The Worlds API is a REST API for managing and querying RDF-based knowledge graphs (worlds). All requests are made over HTTPS to the base URL below.
+
+## Base URL
+
+```text
+https://api.wazoo.dev
+```
+
+For self-hosted deployments, replace this with your own server's URL.
+
+## Authentication
+
+All endpoints require a Bearer token unless the server is running in [unprotected mode](/reference/api-basics/authentication).
+
+```http
+Authorization: Bearer <YOUR_API_KEY>
+```
+
+See the [Authentication guide](/reference/api-basics/authentication) for details on obtaining and using API keys.
+
+## HTTP status codes
+
+| Code | Meaning |
+| :--- | :------ |
+| `200` | Success with response body |
+| `201` | Created — resource was successfully created |
+| `204` | No Content — success with no body (updates, deletes, SPARQL updates) |
+| `400` | Bad Request — invalid parameters or malformed input |
+| `401` | Unauthorized — missing or invalid Bearer token |
+| `403` | Forbidden — authenticated but not permitted |
+| `404` | Not Found — resource does not exist or has been deleted |
+| `405` | Method Not Allowed |
+| `409` | Conflict — e.g. slug already in use |
+| `415` | Unsupported Media Type |
+| `500` | Internal Server Error |
+
+## Error format
+
+All errors return JSON with the following shape:
+
+```json
+{
+  "error": {
+    "message": "World not found"
+  }
+}
+```
+
+---
+
+## Worlds
+
+Worlds are isolated RDF knowledge graph instances. Each world has a unique ID and an optional human-readable slug.
+
+### List worlds
+
+<Note>
+  Requires admin authentication.
+</Note>
+
+```http
+GET /worlds
+```
+
+Returns a paginated list of all worlds.
+
+**Query parameters**
+
+<ParamField query="page" type="integer" default="1">
+  Page number (1-indexed).
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="20">
+  Number of results per page. Maximum: `100`.
+</ParamField>
+
+**Response** `200 OK`
+
+```json
+[
+  {
+    "id": "01JQKXYZ...",
+    "slug": "my-world",
+    "label": "My World",
+    "description": "A sample knowledge graph.",
+    "createdAt": 1741900000000,
+    "updatedAt": 1741900000000,
+    "deletedAt": null
+  }
+]
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="id" type="string" required>
+    Unique ULID identifier for the world.
+  </ResponseField>
+  <ResponseField name="slug" type="string" required>
+    URL-safe human-readable identifier.
+  </ResponseField>
+  <ResponseField name="label" type="string" required>
+    Display name.
+  </ResponseField>
+  <ResponseField name="description" type="string | null">
+    Optional description.
+  </ResponseField>
+  <ResponseField name="createdAt" type="number" required>
+    Unix timestamp (milliseconds) when the world was created.
+  </ResponseField>
+  <ResponseField name="updatedAt" type="number" required>
+    Unix timestamp (milliseconds) when the world was last updated.
+  </ResponseField>
+  <ResponseField name="deletedAt" type="number | null">
+    Unix timestamp (milliseconds) when the world was soft-deleted, or `null`.
+  </ResponseField>
+</Expandable>
+
+**curl example**
+
+```bash
+curl https://api.wazoo.dev/worlds \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+---
+
+### Create world
+
+<Note>
+  Requires admin authentication.
+</Note>
+
+```http
+POST /worlds
+```
+
+Creates a new world and provisions its knowledge graph database.
+
+**Request body** (`application/json`)
+
+<ParamField body="slug" type="string" required>
+  URL-safe identifier. Must be unique across all worlds.
+</ParamField>
+
+<ParamField body="label" type="string" required>
+  Human-readable display name.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Optional description of the world's purpose or content.
+</ParamField>
+
+**Response** `201 Created` — returns the created `World` object.
+
+**Errors**
+
+- `400` — invalid or missing required fields
+- `409` — a world with the same slug already exists
+
+**curl example**
+
+```bash
+curl -X POST https://api.wazoo.dev/worlds \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"slug": "my-world", "label": "My World", "description": "A sample world."}'
+```
+
+---
+
+### Get world
+
+```http
+GET /worlds/:world
+```
+
+Returns a single world by its ID or slug.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Response** `200 OK` — returns a `World` object.
+
+**Errors**
+
+- `404` — world not found or has been deleted
+
+**curl example**
+
+```bash
+curl https://api.wazoo.dev/worlds/my-world \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+---
+
+### Update world
+
+```http
+PUT /worlds/:world
+```
+
+Updates one or more fields of a world. All fields are optional; only provided fields are changed.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Request body** (`application/json`)
+
+<ParamField body="slug" type="string">
+  New URL-safe identifier.
+</ParamField>
+
+<ParamField body="label" type="string">
+  New display name.
+</ParamField>
+
+<ParamField body="description" type="string | null">
+  New description, or `null` to clear it.
+</ParamField>
+
+**Response** `204 No Content`
+
+**Errors**
+
+- `400` — invalid fields
+- `404` — world not found
+
+**curl example**
+
+```bash
+curl -X PUT https://api.wazoo.dev/worlds/my-world \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"label": "Updated Label"}'
+```
+
+---
+
+### Delete world
+
+```http
+DELETE /worlds/:world
+```
+
+Soft-deletes a world. The world is marked as deleted (`deletedAt` is set) and no longer returned in list or get operations.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Response** `204 No Content`
+
+**Errors**
+
+- `404` — world not found or already deleted
+
+**curl example**
+
+```bash
+curl -X DELETE https://api.wazoo.dev/worlds/my-world \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+---
+
+## SPARQL
+
+The SPARQL endpoint implements the [SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/) with additional SPARQL 1.2 (RDF-star) support. It handles both queries (SELECT, ASK, CONSTRUCT, DESCRIBE) and updates (INSERT, DELETE, etc.).
+
+### Execute SPARQL query
+
+```http
+GET  /worlds/:world/sparql
+POST /worlds/:world/sparql
+```
+
+Executes a SPARQL query or update against a world's knowledge graph. `GET` without a `query` parameter returns the SPARQL service description.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**GET query parameters**
+
+<ParamField query="query" type="string">
+  SPARQL query string. If omitted, returns the SPARQL 1.1 Service Description.
+</ParamField>
+
+<ParamField query="default-graph-uri" type="string[]">
+  One or more default graph URIs (repeatable).
+</ParamField>
+
+<ParamField query="named-graph-uri" type="string[]">
+  One or more named graph URIs (repeatable).
+</ParamField>
+
+**POST content types**
+
+| Content-Type | Description |
+| :----------- | :---------- |
+| `application/sparql-query` | Query string in request body |
+| `application/sparql-update` | Update string in request body |
+| `application/x-www-form-urlencoded` | Form-encoded with `query` field |
+
+**Response — SELECT query** `200 OK`
+
+```json
+{
+  "head": { "vars": ["s", "p", "o"], "link": null },
+  "results": {
+    "bindings": [
+      {
+        "s": { "type": "uri", "value": "https://example.org/Alice" },
+        "p": { "type": "uri", "value": "http://schema.org/name" },
+        "o": { "type": "literal", "value": "Alice" }
+      }
+    ]
+  }
+}
+```
+
+**Response — ASK query** `200 OK`
+
+```json
+{
+  "head": { "link": null },
+  "boolean": true
+}
+```
+
+**Response — CONSTRUCT/DESCRIBE query** `200 OK`
+
+Returns a `SparqlQuadsResults` object with a `results.quads` array. Each quad has `subject`, `predicate`, `object`, and `graph` fields.
+
+**Response — UPDATE** `204 No Content`
+
+SPARQL update operations (INSERT DATA, DELETE DATA, etc.) return no body.
+
+**SPARQL value types**
+
+Each binding value is one of:
+
+| Type | Fields |
+| :--- | :----- |
+| `uri` | `value: string` |
+| `bnode` | `value: string` |
+| `literal` | `value: string`, optional `xml:lang`, optional `datatype` |
+| `triple` | `value: { subject, predicate, object }` (RDF-star) |
+
+**curl examples**
+
+<Tabs>
+  <Tab title="SELECT query">
+```bash
+curl -X POST https://api.wazoo.dev/worlds/my-world/sparql \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: application/sparql-query" \
+  -H "Accept: application/sparql-results+json" \
+  --data-binary 'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10'
+```
+  </Tab>
+  <Tab title="INSERT update">
+```bash
+curl -X POST https://api.wazoo.dev/worlds/my-world/sparql \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: application/sparql-update" \
+  --data-binary 'INSERT DATA { <https://example.org/Alice> <http://schema.org/name> "Alice" . }'
+```
+  </Tab>
+  <Tab title="Service description">
+```bash
+curl https://api.wazoo.dev/worlds/my-world/sparql \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Accept: text/turtle"
+```
+  </Tab>
+</Tabs>
+
+---
+
+## Search
+
+### Semantic search
+
+```http
+GET /worlds/:world/search
+```
+
+Performs a hybrid semantic (vector) + full-text search over the world's knowledge graph. Results are ranked using Reciprocal Rank Fusion (RRF).
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Query parameters**
+
+<ParamField query="query" type="string" required>
+  Natural language or keyword search query.
+</ParamField>
+
+<ParamField query="limit" type="integer" default="20">
+  Maximum number of results to return. Maximum: `100`.
+</ParamField>
+
+<ParamField query="subjects" type="string[]">
+  Filter results to triples with these subject IRIs (repeatable).
+</ParamField>
+
+<ParamField query="predicates" type="string[]">
+  Filter results to triples with these predicate IRIs (repeatable).
+</ParamField>
+
+<ParamField query="types" type="string[]">
+  Filter results to entities of these RDF types (repeatable).
+</ParamField>
+
+**Response** `200 OK`
+
+```json
+[
+  {
+    "subject": "https://example.org/Alice",
+    "predicate": "http://schema.org/name",
+    "object": "Alice",
+    "vecRank": 1,
+    "ftsRank": 2,
+    "score": 0.83,
+    "worldId": "01JQKXYZ..."
+  }
+]
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="subject" type="string" required>
+    IRI of the subject node.
+  </ResponseField>
+  <ResponseField name="predicate" type="string" required>
+    IRI of the predicate.
+  </ResponseField>
+  <ResponseField name="object" type="string" required>
+    IRI or literal value of the object.
+  </ResponseField>
+  <ResponseField name="vecRank" type="number | null">
+    Rank from the vector (semantic) search component.
+  </ResponseField>
+  <ResponseField name="ftsRank" type="number | null">
+    Rank from the full-text search component.
+  </ResponseField>
+  <ResponseField name="score" type="number" required>
+    Combined RRF score.
+  </ResponseField>
+  <ResponseField name="worldId" type="string">
+    ID of the world this result belongs to.
+  </ResponseField>
+</Expandable>
+
+**curl example**
+
+```bash
+curl "https://api.wazoo.dev/worlds/my-world/search?query=Alice&limit=5" \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+---
+
+## Import / Export
+
+### Import RDF data
+
+```http
+POST /worlds/:world/import
+```
+
+Imports RDF data into a world. The incoming data is parsed, converted to N-Quads internally, and vectorised for search. The search index is updated atomically.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Request body**
+
+Send raw RDF data with one of the following content types:
+
+| Content-Type | Format |
+| :----------- | :----- |
+| `text/turtle` | Turtle |
+| `application/n-quads` | N-Quads (default) |
+| `application/n-triples` | N-Triples |
+| `text/n3` | N3 |
+
+**Response** `204 No Content`
+
+**Errors**
+
+- `400` — invalid RDF syntax
+- `404` — world not found
+
+**curl example**
+
+```bash
+curl -X POST https://api.wazoo.dev/worlds/my-world/import \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: text/turtle" \
+  --data-binary '<https://example.org/Alice> <http://schema.org/name> "Alice" .'
+```
+
+---
+
+### Export RDF data
+
+```http
+GET /worlds/:world/export
+```
+
+Exports the entire world as an RDF serialization. Supports content negotiation via `Accept` header or an explicit `format` query parameter.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Query parameters**
+
+<ParamField query="format" type="string" default="n-quads">
+  Serialization format. One of: `turtle`, `n-quads`, `n-triples`, `n3`.
+</ParamField>
+
+**Response** `200 OK` — raw RDF data in the requested format.
+
+**curl example**
+
+```bash
+curl "https://api.wazoo.dev/worlds/my-world/export?format=turtle" \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```
+
+---
+
+## Logs
+
+### List logs
+
+```http
+GET /worlds/:world/logs
+```
+
+Returns a paginated list of operation logs for a world. Logs are written automatically for SPARQL queries, updates, imports, and searches.
+
+**Path parameters**
+
+<ParamField path="world" type="string" required>
+  World ID (ULID) or slug.
+</ParamField>
+
+**Query parameters**
+
+<ParamField query="page" type="integer" default="1">
+  Page number.
+</ParamField>
+
+<ParamField query="pageSize" type="integer" default="20">
+  Results per page. Maximum: `100`.
+</ParamField>
+
+<ParamField query="level" type="string">
+  Filter by log level. One of: `info`, `warn`, `error`, `debug`.
+</ParamField>
+
+**Response** `200 OK`
+
+```json
+[
+  {
+    "id": "01JQKXYZ...",
+    "worldId": "01JQKXYZ...",
+    "timestamp": 1741900000000,
+    "level": "info",
+    "message": "SPARQL query",
+    "metadata": {
+      "query": "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10"
+    }
+  }
+]
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="id" type="string" required>
+    Unique ULID log entry ID.
+  </ResponseField>
+  <ResponseField name="worldId" type="string" required>
+    ID of the world this log belongs to.
+  </ResponseField>
+  <ResponseField name="timestamp" type="number" required>
+    Unix timestamp (milliseconds) of the operation.
+  </ResponseField>
+  <ResponseField name="level" type="string" required>
+    Log level: `info`, `warn`, `error`, or `debug`.
+  </ResponseField>
+  <ResponseField name="message" type="string" required>
+    Human-readable description of the operation.
+  </ResponseField>
+  <ResponseField name="metadata" type="object | null">
+    Additional structured context for the operation (e.g. truncated query text, triple count).
+  </ResponseField>
+</Expandable>
+
+**curl example**
+
+```bash
+curl "https://api.wazoo.dev/worlds/my-world/logs?level=info&pageSize=50" \
+  -H "Authorization: Bearer $WORLDS_API_KEY"
+```

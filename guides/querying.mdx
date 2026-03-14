@@ -1,0 +1,273 @@
+---
+title: "Querying"
+description: "Execute SPARQL 1.1 SELECT, CONSTRUCT, ASK, INSERT, and DELETE queries against your knowledge graph."
+---
+
+The Worlds Platform uses **SPARQL 1.1** for structured querying and updates. The SPARQL endpoint is available at `POST /worlds/:id/sparql` and also supports `GET` for read-only queries.
+
+## The SPARQL execution pipeline
+
+When you execute a SPARQL query, the server follows this pipeline:
+
+1. Loads the world's RDF blob from the database.
+2. Resolves the world-specific database client via the database manager.
+3. For updates: applies the patch to the graph, re-embeds affected chunks, and persists the new blob.
+4. For queries: executes the SPARQL query over the in-memory N3 store via the Comunica engine.
+5. Returns results as `application/sparql-results+json`.
+
+## SDK usage
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+const result = await sdk.worlds.sparql("my-world", `
+  SELECT ?name WHERE {
+    <http://example.com/ethan> <http://schema.org/relatedTo> ?person .
+    ?person <http://schema.org/givenName> ?name .
+  }
+`);
+```
+
+## Query types
+
+<Tabs>
+  <Tab title="SELECT">
+    Returns rows of variable bindings.
+
+    ```typescript
+    const result = await sdk.worlds.sparql("my-world", `
+      PREFIX schema: <http://schema.org/>
+      PREFIX ex: <http://example.com/>
+
+      SELECT ?person ?name WHERE {
+        ?person a schema:Person ;
+                schema:givenName ?name .
+      }
+      ORDER BY ?name
+      LIMIT 10
+    `);
+
+    if (result && "results" in result) {
+      for (const binding of result.results.bindings) {
+        console.log(binding.name.value);
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="CONSTRUCT">
+    Returns a new RDF graph. The Worlds API returns quads in JSON format.
+
+    ```typescript
+    const result = await sdk.worlds.sparql("my-world", `
+      PREFIX schema: <http://schema.org/>
+      PREFIX ex: <http://example.com/>
+
+      CONSTRUCT {
+        ?person schema:name ?name .
+        ?person schema:worksFor ?org .
+      } WHERE {
+        ?person a schema:Person ;
+                schema:givenName ?name ;
+                schema:worksFor ?org .
+      }
+    `);
+
+    if (result && "results" in result && "quads" in result.results) {
+      for (const quad of result.results.quads) {
+        console.log(quad.subject.value, quad.predicate.value, quad.object.value);
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="ASK">
+    Returns a boolean indicating whether a pattern exists.
+
+    ```typescript
+    const result = await sdk.worlds.sparql("my-world", `
+      PREFIX schema: <http://schema.org/>
+      PREFIX ex: <http://example.com/>
+
+      ASK {
+        ex:ethan schema:worksFor ex:acme .
+      }
+    `);
+
+    if (result && "boolean" in result) {
+      console.log(result.boolean); // true or false
+    }
+    ```
+  </Tab>
+
+  <Tab title="INSERT">
+    Inserts triples into the graph. Returns `null` (HTTP 204).
+
+    ```typescript
+    await sdk.worlds.sparql("my-world", `
+      PREFIX schema: <http://schema.org/>
+      PREFIX ex: <http://example.com/>
+
+      INSERT DATA {
+        ex:alice a schema:Person ;
+            schema:givenName "Alice" ;
+            schema:worksFor ex:acme .
+      }
+    `);
+    ```
+  </Tab>
+
+  <Tab title="DELETE">
+    Removes triples matching a pattern.
+
+    ```typescript
+    await sdk.worlds.sparql("my-world", `
+      PREFIX schema: <http://schema.org/>
+      PREFIX ex: <http://example.com/>
+
+      DELETE WHERE {
+        ex:alice schema:jobTitle ?title .
+      }
+    `);
+    ```
+  </Tab>
+</Tabs>
+
+## Named graphs and dataset parameters
+
+The SDK's `sparql()` method accepts optional `defaultGraphUris` and `namedGraphUris` to scope queries to specific graph contexts:
+
+```typescript
+const result = await sdk.worlds.sparql(
+  "my-world",
+  `SELECT ?s ?p ?o WHERE { ?s ?p ?o . }`,
+  {
+    defaultGraphUris: ["http://example.com/graph/employees"],
+    namedGraphUris: ["http://example.com/graph/projects"],
+  }
+);
+```
+
+You can also store data in named graphs using INSERT:
+
+```typescript
+await sdk.worlds.sparql("my-world", `
+  PREFIX ex: <http://example.com/>
+
+  INSERT DATA {
+    GRAPH <http://example.com/graph/employees> {
+      ex:alice a <http://schema.org/Person> .
+    }
+  }
+`);
+```
+
+## Common query patterns
+
+### Filter by type
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?person ?name WHERE {
+    ?person a schema:Person ;
+            schema:givenName ?name .
+    FILTER(CONTAINS(LCASE(?name), "ali"))
+  }
+`);
+```
+
+### Optional properties
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?person ?name ?email WHERE {
+    ?person a schema:Person ;
+            schema:givenName ?name .
+    OPTIONAL { ?person schema:email ?email . }
+  }
+`);
+```
+
+### Aggregate queries
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?org (COUNT(?person) AS ?headcount) WHERE {
+    ?person a schema:Person ;
+            schema:worksFor ?org .
+  }
+  GROUP BY ?org
+  ORDER BY DESC(?headcount)
+`);
+```
+
+### Subquery pattern
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?person ?name WHERE {
+    ?person schema:givenName ?name .
+    {
+      SELECT ?person WHERE {
+        ?person schema:worksFor <http://example.com/acme> .
+      }
+      LIMIT 5
+    }
+  }
+`);
+```
+
+## Result shape
+
+SELECT queries return bindings following the [SPARQL 1.1 Query Results JSON Format](https://www.w3.org/TR/sparql11-results-json/):
+
+```json
+{
+  "head": { "vars": ["name", "email"] },
+  "results": {
+    "bindings": [
+      {
+        "name": { "type": "literal", "value": "Alice" },
+        "email": { "type": "literal", "value": "alice@example.com" }
+      }
+    ]
+  }
+}
+```
+
+Each binding value is a `SparqlValue` with a `type` field (`"uri"`, `"literal"`, `"bnode"`, or `"triple"`).
+
+## Using the REST API directly
+
+```bash
+curl -X POST http://localhost:8000/worlds/my-world/sparql \
+  -H "Authorization: Bearer $WORLDS_API_KEY" \
+  -H "Content-Type: application/sparql-query" \
+  -H "Accept: application/sparql-results+json" \
+  -d 'SELECT ?s ?p ?o WHERE { ?s ?p ?o . } LIMIT 10'
+```
+
+<Note>
+SPARQL updates (INSERT, DELETE) must use `POST` and are not allowed via `GET`. The server enforces this per the SPARQL 1.1 Protocol specification.
+</Note>
+
+## Performance tips
+
+- **Use `LIMIT`** on exploratory queries. The graph may be large.
+- **Filter early**: Apply `FILTER` and `VALUES` clauses as early as possible in the query to reduce intermediate result sets.
+- **Avoid `SELECT *`** on large graphs. Select only the variables you need.
+- **Use `VALUES` for known entity sets** instead of iterating client-side and issuing many small queries.
+- **Use `ASK` for existence checks** instead of `SELECT` — it stops evaluation as soon as one match is found.

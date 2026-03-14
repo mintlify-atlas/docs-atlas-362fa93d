@@ -1,0 +1,174 @@
+---
+title: "Contributing guidelines"
+description: "Code style, commit conventions, branch naming, PR process, and issue reporting for the Worlds Platform."
+---
+
+Worlds Platform welcomes contributions from developers of all skill levels. This page covers the standards and processes for opening issues, writing code, and submitting pull requests.
+
+## Code style
+
+The project uses Deno's built-in formatter and linter as its sole style authority. There is no separate `.eslintrc` or `prettier.config` — all style decisions are handled by the Deno toolchain.
+
+### Formatting
+
+```bash
+deno task fmt
+```
+
+This runs `deno fmt` across the entire workspace (excluding `packages/console` and `packages/docs`, which are handled separately). Formatting is enforced in CI — a PR with unformatted code will not pass the `Check` workflow.
+
+### Linting
+
+```bash
+deno task lint
+```
+
+This runs `deno lint` across all workspace packages. Fix all lint errors before opening a PR.
+
+### Type checking
+
+```bash
+deno task check
+```
+
+Runs `deno check` to validate TypeScript types without emitting output.
+
+### Pre-commit
+
+Run all checks in one command before committing:
+
+```bash
+deno task precommit
+```
+
+<Tip>
+  Running `deno task precommit` locally catches the same issues the CI pipeline checks, saving review cycles.
+</Tip>
+
+## TypeScript standards
+
+- Use **TypeScript** for all new code — no plain JavaScript files in the server, SDK, AI SDK, or CLI packages.
+- Add descriptive JSDoc comments to all public functions and classes.
+- Use `Zod` for runtime validation of external inputs (request bodies, environment variables).
+- Keep types co-located with the code that uses them; avoid large shared `types.ts` files unless a type is used across multiple files.
+
+## Commit messages
+
+Write commit messages in the imperative mood using a short summary line:
+
+```text
+feat: add SPARQL federation endpoint
+fix: resolve auth token expiry race condition
+chore: update deno.lock
+docs: add CLI reference for worlds sparql command
+test: add route tests for world creation
+refactor: extract query builder into service module
+```
+
+Prefixes to use:
+
+| Prefix | When to use |
+| :----- | :---------- |
+| `feat` | New feature or capability |
+| `fix` | Bug fix |
+| `docs` | Documentation changes only |
+| `test` | Adding or updating tests |
+| `chore` | Dependency updates, tooling, CI |
+| `refactor` | Code restructuring without behavior change |
+| `perf` | Performance improvements |
+
+Keep the summary line under 72 characters. Add a body paragraph for context if the change is non-obvious.
+
+## Branch naming
+
+Use a prefix that matches your change type, followed by a short kebab-case description:
+
+```text
+feat/sparql-federation-endpoint
+fix/auth-token-expiry
+docs/cli-reference-update
+chore/update-deno-lock
+test/world-creation-route
+```
+
+Branch names should be lowercase with hyphens. Avoid spaces, underscores, or special characters.
+
+## Pull request process
+
+<Steps>
+  <Step title="Fork and create a branch">
+    Fork the `wazootech/worlds` repository and create a branch from `main` using the naming convention above:
+
+    ```bash
+    git checkout -b feat/your-feature-name
+    ```
+  </Step>
+
+  <Step title="Make your changes">
+    Follow the coding standards and the [Developer guide](/contributing/developer-guide) for structural patterns. Ensure all new features include tests.
+  </Step>
+
+  <Step title="Run pre-commit checks">
+    ```bash
+    deno task precommit
+    ```
+
+    All checks must pass before opening the PR.
+  </Step>
+
+  <Step title="Open the pull request">
+    Submit the PR against the `main` branch. Include:
+
+    - A clear description of what the change does and why
+    - A reference to any related issues (e.g., `Closes #123`)
+    - Notes on testing approach or any manual verification steps
+  </Step>
+
+  <Step title="Respond to review">
+    All PRs require at least one maintainer review. Maintainers may request changes to ensure code quality, performance, and architectural alignment. Address feedback by pushing additional commits to the same branch.
+  </Step>
+</Steps>
+
+### Review criteria
+
+Reviewers check for:
+
+- Correctness and test coverage
+- Adherence to the resource and routing patterns documented in the [Developer guide](/contributing/developer-guide)
+- No regressions to existing behavior
+- Consistent formatting and style
+- Clear, minimal diffs — avoid mixing unrelated changes in a single PR
+
+## Reporting issues
+
+Before opening a new issue, search [GitHub Issues](https://github.com/wazootech/worlds/issues) to check whether it has already been reported.
+
+When opening an issue, provide:
+
+<AccordionGroup>
+  <Accordion title="Bug reports">
+    - **Clear title**: Summarize the problem in one line.
+    - **Steps to reproduce**: Provide a minimal, reproducible example — ideally a short code snippet or curl command.
+    - **Expected behavior**: Describe what you expected to happen.
+    - **Actual behavior**: Describe what actually happened.
+    - **Environment**: Deno version, OS, and relevant package versions.
+    - **Logs**: Attach any error messages or stack traces.
+  </Accordion>
+
+  <Accordion title="Feature requests">
+    - **Clear title**: Summarize the capability you want.
+    - **Motivation**: Explain the problem this solves and who benefits.
+    - **Proposed solution**: Describe your preferred approach if you have one.
+    - **Alternatives**: List other approaches you considered.
+  </Accordion>
+
+  <Accordion title="Documentation issues">
+    - Link to the specific page or section that needs improvement.
+    - Describe what is missing, incorrect, or unclear.
+    - Suggest the correct information if you know it.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  For sensitive security issues, do not open a public GitHub issue. Contact the maintainers directly at [support@wazoo.dev](mailto:support@wazoo.dev).
+</Note>

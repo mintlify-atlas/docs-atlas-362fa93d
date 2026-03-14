@@ -1,0 +1,56 @@
+---
+title: "Changelog"
+description: "Release history for the Worlds Platform."
+---
+
+## March 2026 — v1.0.0-alpha
+
+Initial public release of the Worlds Platform.
+
+### Core platform
+
+- **Neuro-symbolic engine**: Hybrid semantic vector search (via Ollama or OpenRouter embeddings) fused with SPARQL 1.1 determinism, ranked by Reciprocal Rank Fusion (RRF).
+- **SPARQL 1.1 + 1.2 support**: Full SPARQL 1.1 query and update protocol, with SPARQL 1.2 (RDF-star) triple term support.
+- **Worlds API**: REST API for creating, reading, updating, and deleting knowledge graph instances, with import/export in Turtle, N-Quads, N-Triples, and N3 formats.
+- **libSQL / Turso storage**: Pluggable database backend — file-based SQLite for local development or per-world Turso databases for production scale.
+- **Soft-delete semantics**: Worlds are soft-deleted; `deletedAt` is set rather than records being removed.
+- **ETag support**: `GET` responses include ETag headers for conditional caching.
+
+### AI SDK (`@wazoo/worlds-ai-sdk`)
+
+- **`executeSparql`**: Execute SPARQL queries and updates against a world from within an LLM tool call. Read-only by default; write mode opt-in per source.
+- **`searchEntities`**: Hybrid semantic + full-text entity search.
+- **`discoverSchema`**: Introspect RDF classes and properties available in the knowledge graph.
+- **`generateIri`**: Generate ULID-based IRIs for new entities.
+- **`disambiguateEntities`**: Resolve ambiguous entity references from search candidates using exact-match and RRF score heuristics.
+- **`validateRdf`**: Validate proposed RDF triples against SHACL shapes and the existing ontology before insertion.
+- **Vercel AI SDK compatibility**: All tools are compatible with the `ai` package's `tool()` interface.
+
+### TypeScript SDK (`@wazoo/worlds-sdk`)
+
+- `WorldsSdk` client with typed methods for all API endpoints.
+- Full Zod schema coverage for request and response types.
+- SPARQL 1.1 + 1.2 result types: `SparqlSelectResults`, `SparqlAskResults`, `SparqlQuadsResults`.
+- `RdfFormat` union type: `turtle | n-quads | n-triples | n3`.
+
+### CLI (`@wazoo/worlds-cli`)
+
+- `worlds create`, `list`, `get`, `update`, `delete` — world lifecycle management.
+- `worlds sparql` — execute queries and updates from files or inline strings.
+- `worlds search` — hybrid semantic search from the terminal.
+- `worlds import` / `worlds export` — local file import and stdout export.
+- `worlds chat` — interactive AI chat REPL powered by OpenRouter, with read/write mode.
+- Dual-mode operation: remote API mode (via `WORLDS_BASE_URL` + `WORLDS_API_KEY`) or local in-process server mode.
+
+### Server (`@wazoo/worlds-server`)
+
+- Deno-native HTTP server built on `@fartlabs/rt`.
+- Bearer token authentication middleware with unprotected mode for local development.
+- SPARQL protocol compliance: GET with `query` param, POST with `application/sparql-query`, `application/sparql-update`, and `application/x-www-form-urlencoded`.
+- SPARQL Service Description endpoint (GET without query).
+- Automatic search index updates on import and SPARQL write operations via `BatchPatchHandler`.
+- Per-world operation logs with structured metadata.
+
+### Documentation
+
+- Mintlify documentation site covering quickstart, guides, and full API/CLI/configuration reference.

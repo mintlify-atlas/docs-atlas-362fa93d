@@ -1,0 +1,143 @@
+---
+title: "Request flow"
+description: "How a request moves through the Worlds API server: routing, authentication, validation, execution, and response."
+---
+
+The Worlds API server is built on [Deno](https://deno.com) for secure, edge-ready execution with web-standard APIs. This page describes the lifecycle of a request from the moment it arrives at the server to the moment a response is returned.
+
+## Request lifecycle
+
+<Steps>
+  <Step title="Routing">
+    The server matches the incoming HTTP method and URL path against registered route handlers using `@fartlabs/rt`. Routes are organised into four sub-routers:
+
+    - `worldsRouter` — world CRUD (`/worlds`, `/worlds/:world`)
+    - `sparqlRouter` — SPARQL endpoint (`/worlds/:world/sparql`)
+    - `logsRouter` — operation logs (`/worlds/:world/logs`)
+    - `searchRouter` — semantic search (`/worlds/:world/search`)
+
+    Each sub-router is created from the `ServerContext` that holds the database client, embedding provider, and API key.
+  </Step>
+
+  <Step title="Authentication">
+    Every route handler calls `authorizeRequest(appContext, request)`. This function inspects the `Authorization: Bearer <token>` header and compares it against the server's configured `WORLDS_API_KEY`.
+
+    - If `WORLDS_API_KEY` is not configured, the server is in **unprotected mode** and all requests receive admin access.
+    - If the header is missing or the token does not match, the handler returns `401 Unauthorized`.
+    - If the token matches, the handler receives an `AuthorizedRequest` with `{ admin: true }`.
+  </Step>
+
+  <Step title="Input validation">
+    Route handlers validate all input — path parameters, query parameters, and request bodies — against Zod schemas shared between the SDK and the server (`@wazoo/worlds-sdk`).
+
+    - Invalid pagination returns `400 Bad Request`.
+    - Invalid JSON bodies return `400 Bad Request`.
+    - Unsupported content types on the SPARQL endpoint return `415 Unsupported Media Type`.
+  </Step>
+
+  <Step title="World resolution">
+    For world-specific endpoints, the handler looks up the world by ID or slug in the main libSQL database. If the world is not found or has a non-null `deleted_at` timestamp, it returns `404 Not Found`.
+
+    For per-world operations (SPARQL, search, logs, import/export), the handler acquires the world's managed database connection via the `DatabaseManager`. This is either a file-based client or a Turso-provisioned database depending on the server configuration.
+  </Step>
+
+  <Step title="Execution">
+    The handler performs the requested operation:
+
+    - **World CRUD**: Direct libSQL queries against the metadata database.
+    - **Import**: Parses incoming RDF, converts to N-Quads, generates vector embeddings for the search index, stores the blob, and writes a log entry.
+    - **Export**: Reads the stored N-Quads blob and serialises it to the requested format.
+    - **SPARQL query**: Loads the world's blob, executes the query via an in-memory N3 store, validates the result, writes a log entry, and returns JSON.
+    - **SPARQL update**: Executes the update, commits search index patches via `BatchPatchHandler`, persists the updated blob, and returns `204 No Content`.
+    - **Search**: Runs hybrid vector + full-text search through `ChunksService`, writes a log entry, and returns ranked results.
+  </Step>
+
+  <Step title="Response">
+    The server returns a standard web `Response`:
+
+    - JSON results are returned with `Content-Type: application/json`.
+    - SPARQL results use `Content-Type: application/sparql-results+json`.
+    - RDF exports use the content type matching the serialization format.
+    - Successful mutations return `204 No Content` with no body.
+    - Errors return JSON in the format `{ "error": { "message": "..." } }`.
+
+    `GET` responses include `ETag` headers based on the current state of the world data, enabling conditional requests.
+  </Step>
+</Steps>
+
+## SPARQL execution pipeline
+
+The SPARQL endpoint has its own internal pipeline for handling both queries and updates.
+
+```
+Incoming request
+       │
+       ▼
+  parseQuery()                ← Handles GET, POST, form-encoded, body-encoded
+       │
+       ▼
+  isSparqlUpdate()            ← Determines if the operation is a query or update
+       │
+  ┌────┴────┐
+  │ Query   │ Update
+  │         │
+  ▼         ▼
+sparql()  BatchPatchHandler
+  │         │
+  ▼         ├── handlePatch() → embed triples → update vector index
+  result    ├── persist blob
+  │         └── write log entry
+  ▼         │
+ JSON      204
+response
+```
+
+The `sparql()` function executes the query against an N3.js in-memory store populated from the world's persisted N-Quads blob. For updates, the `BatchPatchHandler` intercepts insertions and deletions, generates embeddings via the configured provider, and commits them to the full-text and vector search index.
+
+## Search pipeline
+
+The search endpoint uses a hybrid retrieval strategy.
+
+```
+  GET /worlds/:world/search?query=...
+           │
+           ▼
+  ChunksService.search()
+           │
+     ┌─────┴─────┐
+     │           │
+  vector FTS     full-text FTS
+  (embedding     (SQLite FTS5)
+   similarity)
+     │           │
+     └─────┬─────┘
+           │
+  Reciprocal Rank Fusion
+           │
+           ▼
+    ranked results
+```
+
+The query string is embedded using the same provider configured for import (Ollama or OpenRouter). Both the vector similarity results and the full-text results are merged using Reciprocal Rank Fusion (RRF) to produce a final ranked list of `TripleSearchResult` objects.
+
+## Server startup
+
+Before serving requests, `createServerContext()` performs the following:
+
+<Steps>
+  <Step title="Validate configuration">
+    Checks that required variables (`LIBSQL_URL`, `WORLDS_BASE_DIR`, `WORLDS_EMBEDDINGS_DIMENSIONS`) are present and valid.
+  </Step>
+  <Step title="Initialize database">
+    Creates the libSQL client and runs `initializeDatabase()` to ensure all metadata tables exist.
+  </Step>
+  <Step title="Select embedding provider">
+    Instantiates either `OpenRouterEmbeddings` (if `OPENROUTER_API_KEY` is set) or `OllamaEmbeddings` as the active embedding provider.
+  </Step>
+  <Step title="Select database manager">
+    Instantiates either `TursoDatabaseManager` (if `TURSO_API_TOKEN` is set) or `FileDatabaseManager` for per-world database provisioning.
+  </Step>
+  <Step title="Build and return server">
+    Creates a `Router` instance, registers all sub-routers with the `ServerContext`, and returns it as a standard `Deno.ServeDefaultExport`.
+  </Step>
+</Steps>

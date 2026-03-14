@@ -1,0 +1,169 @@
+---
+title: "Datasets"
+description: "Sample RDF datasets and ontologies to jumpstart development and testing."
+---
+
+The following datasets are available to help you get started with Worlds. Import them into a world to explore the platform's query and search capabilities.
+
+## Solar system dataset
+
+The repository includes a sample `solar_system.ttl` dataset that models planets, moons, and their relationships using schema.org vocabulary.
+
+```turtle
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/solar-system/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Planets
+ex:earth
+    a schema:Place ;
+    schema:name "Earth" ;
+    schema:description "The third planet from the Sun and the only known planet to harbor life." ;
+    schema:containedInPlace ex:solar-system .
+
+ex:mars
+    a schema:Place ;
+    schema:name "Mars" ;
+    schema:description "The fourth planet from the Sun, known as the Red Planet." ;
+    schema:containedInPlace ex:solar-system .
+
+# Moons
+ex:moon
+    a schema:Place ;
+    schema:name "Moon" ;
+    schema:description "Earth's only natural satellite." ;
+    schema:containedInPlace ex:earth .
+
+ex:phobos
+    a schema:Place ;
+    schema:name "Phobos" ;
+    schema:description "The larger and closer of Mars's two moons." ;
+    schema:containedInPlace ex:mars .
+
+exe:deimos
+    a schema:Place ;
+    schema:name "Deimos" ;
+    schema:description "The smaller and more distant moon of Mars." ;
+    schema:containedInPlace ex:mars .
+```
+
+### Import the solar system dataset
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: Deno.env.get("WORLDS_BASE_URL") ?? "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+// Read and import the sample dataset
+const turtleData = await Deno.readTextFile("./solar_system.ttl");
+await sdk.worlds.import("solar-world", turtleData, { format: "turtle" });
+
+// Query the imported data
+const moons = await sdk.worlds.sparql("solar-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/solar-system/>
+
+  SELECT ?moon ?name WHERE {
+    ?moon schema:containedInPlace ex:earth ;
+          schema:name ?name .
+  }
+`);
+
+console.log("Earth's moons:", moons);
+```
+
+## Personal memory schema
+
+A foundational ontology for personal AI assistants. Models people, tasks, events, and contexts.
+
+```turtle
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix schema: <http://schema.org/> .
+@prefix mem: <http://example.com/memory#> .
+
+# Core classes
+mem:Memory a owl:Class ;
+    rdfs:label "Memory" ;
+    rdfs:comment "A discrete remembered fact or experience." .
+
+mem:Context a owl:Class ;
+    rdfs:label "Context" ;
+    rdfs:comment "A situation or frame that groups related memories." .
+
+# Properties
+mem:recordedAt a owl:DatatypeProperty ;
+    rdfs:domain mem:Memory ;
+    rdfs:range <http://www.w3.org/2001/XMLSchema#dateTime> .
+
+mem:relatesToPerson a owl:ObjectProperty ;
+    rdfs:domain mem:Memory ;
+    rdfs:range schema:Person .
+
+mem:inContext a owl:ObjectProperty ;
+    rdfs:domain mem:Memory ;
+    rdfs:range mem:Context .
+```
+
+## Corporate knowledge graph
+
+A sample dataset for internal documentation use cases. Models employees, teams, projects, and documents.
+
+```turtle
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/corp/> .
+
+# Departments
+ex:engineering a schema:Organization ;
+    schema:name "Engineering" ;
+    schema:parentOrganization ex:acme .
+
+ex:product a schema:Organization ;
+    schema:name "Product" ;
+    schema:parentOrganization ex:acme .
+
+# Employees
+ex:alice a schema:Person ;
+    schema:givenName "Alice" ;
+    schema:jobTitle "Staff Engineer" ;
+    schema:memberOf ex:engineering .
+
+ex:bob a schema:Person ;
+    schema:givenName "Bob" ;
+    schema:jobTitle "Product Manager" ;
+    schema:memberOf ex:product .
+
+# Projects
+ex:project-atlas a schema:CreativeWork ;
+    schema:name "Project Atlas" ;
+    schema:description "Internal data platform initiative." ;
+    schema:contributor ex:alice, ex:bob .
+```
+
+## Public RDF datasets
+
+You can import any publicly available RDF dataset into a Worlds world. Some well-known sources:
+
+| Dataset | Format | Description |
+| :--- | :--- | :--- |
+| [DBpedia](https://dbpedia.org) | Turtle, N-Triples | Structured data from Wikipedia |
+| [Wikidata](https://wikidata.org/wiki/Wikidata:Database_download) | JSON-LD, Turtle | Knowledge base maintained by Wikimedia |
+| [Schema.org Examples](https://schema.org/docs/full.html) | JSON-LD, Turtle | Reference vocabulary and examples |
+| [FOAF Vocabulary](http://xmlns.com/foaf/spec/) | RDF/XML, Turtle | Friend-of-a-Friend social graph vocabulary |
+
+### Import a public dataset
+
+```typescript
+// Fetch a public Turtle file and import it
+const response = await fetch("https://example.com/dataset.ttl");
+const turtleData = await response.text();
+
+await sdk.worlds.import("research-world", turtleData, { format: "turtle" });
+```
+
+<Note>
+Large public datasets (millions of triples) may take several minutes to import and index. Start with a subset for development and testing.
+</Note>

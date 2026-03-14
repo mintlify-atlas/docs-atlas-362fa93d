@@ -1,0 +1,117 @@
+---
+title: "Use cases"
+description: "How teams and agents use the Worlds Platform for memory, RAG, knowledge management, and multi-agent coordination."
+---
+
+The Worlds Platform provides flexible infrastructure for a wide range of neuro-symbolic and agentic applications. Below are the primary use cases.
+
+## Personal AI memory
+
+Build a truly personalized assistant that remembers every detail of your digital life — from meeting notes to research papers — with deterministic accuracy.
+
+- **Deterministic recall**: No more "I think you mentioned..." — the agent retrieves specific facts from your private RDF graph.
+- **Privacy by design**: Memory stays local or edge-deployed, ensuring high-fidelity recall without compromising data ownership.
+
+```typescript
+// Store a personal fact
+await sdk.worlds.sparql(
+  "personal-memory",
+  `
+  INSERT DATA {
+    <http://me/preferences/coffee> <http://schema.org/name> "Oat latte, no sugar" .
+  }
+`,
+);
+
+// Recall it later
+const result = await sdk.worlds.sparql(
+  "personal-memory",
+  `SELECT ?pref WHERE { <http://me/preferences/coffee> <http://schema.org/name> ?pref . }`,
+);
+```
+
+## Enterprise knowledge graphs
+
+Transform fragmented organizational data into a unified, queryable knowledge state for internal tools and agents.
+
+- **Structural grounding**: Ensure your enterprise bots answer questions based on the latest company ontologies.
+- **Auditability**: Every agent action is backed by a verifiable fact in the graph, providing a clear audit trail for compliance.
+
+```typescript
+// Import an org chart as RDF
+await sdk.worlds.import(
+  "company-knowledge",
+  orgChartTurtle,
+  { format: "turtle" },
+);
+
+// Query reporting relationships
+const managers = await sdk.worlds.sparql(
+  "company-knowledge",
+  `
+  SELECT ?employee ?manager WHERE {
+    ?employee <http://example.com/reportsTo> ?manager .
+  }
+`,
+);
+```
+
+## Agentic tool grounding
+
+Provide autonomous agents with a structured "map" of the tools and systems they interact with.
+
+- **Schema discovery**: Agents use `discover-schema` to introspect available classes and properties before executing actions.
+- **Constraint enforcement**: Use symbolic logic to define what an agent can and cannot do within a specific operational context.
+
+```typescript
+import { createTools } from "@wazoo/worlds-ai-sdk";
+
+const tools = createTools({
+  sdk,
+  sources: [{ id: "tool-registry" }],
+});
+
+// The agent discovers available tools by querying the world's schema
+// before taking any action.
+```
+
+## Research and analysis
+
+Manage complex research datasets where relationships between entities are as important as the data points themselves.
+
+- **Complex querying**: Use SPARQL to find non-obvious connections across massive datasets.
+- **Multi-modal fusion**: Combine document textures with structural knowledge for deep, contextual analysis.
+
+```typescript
+// Find papers citing a specific methodology
+const citations = await sdk.worlds.sparql(
+  "research-db",
+  `
+  SELECT ?paper ?author WHERE {
+    ?paper <http://purl.org/dc/terms/references> <http://example.com/methodology/rrf> .
+    ?paper <http://schema.org/author> ?author .
+  }
+`,
+);
+```
+
+## Multi-agent coordination
+
+Multiple agents can share a single world to coordinate on tasks without direct communication. Each agent reads and writes to the same knowledge graph, creating an implicit shared state.
+
+<Tip>
+  See the [Roadmap](/overview/roadmap) for planned multi-agent synchronization and real-time conflict resolution features.
+</Tip>
+
+## RAG workflows
+
+Worlds can serve as the knowledge backend for advanced RAG pipelines that go beyond simple vector similarity.
+
+<CardGroup cols={2}>
+  <Card title="Graph RAG" icon="diagram-project" href="/guides/rag-workflows/graph-rag">
+    Combine knowledge graph traversal with vector search for high-precision retrieval.
+  </Card>
+  <Card title="Ontology RAG" icon="sitemap" href="/guides/rag-workflows/ontology-rag">
+    Ground retrieval in a structured ontology to reduce hallucinations.
+  </Card>
+</CardGroup>

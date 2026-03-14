@@ -1,0 +1,142 @@
+---
+title: "AI agent integration"
+description: "Connect Worlds to LLM agents using the AI SDK and the Vercel AI SDK tool-calling interface."
+---
+
+After installing the Worlds SDK, you can give AI agents structured, persistent memory through the `@wazoo/worlds-ai-sdk` package.
+
+## Install the AI SDK
+
+```bash
+deno add jsr:@wazoo/worlds-ai-sdk
+```
+
+## How it works
+
+The `createTools()` function generates a set of LLM-compatible tool definitions that agents can call to read and write knowledge in your worlds. It wraps the Worlds SDK and exposes the following tools:
+
+| Tool | Purpose |
+| :--- | :--- |
+| `discover-schema` | Introspect available classes and properties in a world |
+| `execute-sparql` | Run precise SPARQL queries and updates |
+| `search-entities` | Perform hybrid semantic and keyword search |
+| `generate-iri` | Create stable, predictable identifiers for new entities |
+
+## Quickstart with Vercel AI SDK
+
+This example connects an OpenAI agent to a Worlds knowledge base using `generateText`.
+
+```typescript
+import { generateText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+import { createTools } from "@wazoo/worlds-ai-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+const { text } = await generateText({
+  model: openai("gpt-4o"),
+  tools: createTools({
+    sdk,
+    sources: [{ id: "my-knowledge-base" }],
+  }),
+  prompt: "Find all people in the knowledge base and describe them.",
+});
+
+console.log(text);
+```
+
+## Streaming responses
+
+For interactive applications, use `streamText` to stream responses token-by-token.
+
+```typescript
+import { streamText } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { WorldsSdk } from "@wazoo/worlds-sdk";
+import { createTools } from "@wazoo/worlds-ai-sdk";
+
+const sdk = new WorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: "your-api-key",
+});
+
+const result = streamText({
+  model: openai("gpt-4o"),
+  tools: createTools({
+    sdk,
+    sources: [{ id: "my-knowledge-base" }],
+  }),
+  prompt: "What do you know about the relationships in this world?",
+});
+
+for await (const chunk of result.textStream) {
+  process.stdout.write(chunk);
+}
+```
+
+## Multiple sources
+
+You can expose multiple worlds to a single agent by listing them all in `sources`.
+
+```typescript
+const tools = createTools({
+  sdk,
+  sources: [
+    { id: "customer-data" },
+    { id: "product-catalog" },
+    { id: "support-history" },
+  ],
+});
+```
+
+The agent can then query across all three knowledge bases using the same tool interface.
+
+## Vibe coding
+
+["Vibe coding"](https://x.com/karpathy/status/1886192184808149383) is the practice of using AI coding agents — including Claude Code, Windsurf, or Cursor — to build applications through high-level intent rather than manual line-by-line coding.
+
+Worlds is well-suited for vibe coding because its state is semantic and malleable. Paste the following prompt into your agent's context to help it interact with Worlds:
+
+```markdown
+I am building an application using Worlds. Worlds are persistent, semantic
+knowledge containers.
+
+- Use the `@wazoo/worlds-sdk` SDK, which is available on JSR, to interact with
+  them.
+- Every World has a `worldId`.
+- Store data as "Malleable Knowledge", which automatically indexes and becomes
+  searchable.
+- Use the `search` endpoint to retrieve context from a World.
+
+When I ask you to "Remember X", call the Worlds SDK to store it. When I ask a
+question about X, search the World for context first.
+```
+
+## Integration with Claude Code
+
+If you use **Claude Code**, you can add Worlds as a custom skill by providing the OpenAPI specification.
+
+<Steps>
+  <Step title="Get your API key">
+    Retrieve your key from the [Worlds Console](https://console.wazoo.dev).
+  </Step>
+  <Step title="Mount the spec">
+    Tell Claude to read the OpenAPI spec at `https://docs.wazoo.dev/openapi.json`.
+  </Step>
+  <Step title="Run the command">
+    ```bash
+    claude "Help me build a personal memory world for my project."
+    ```
+  </Step>
+</Steps>
+
+## Best practices
+
+- **Semantic naming**: Give your worlds descriptive names. The agent uses these names to choose the correct knowledge container for context.
+- **Verbose connectors**: Let the AI agent handle configuration logic when setting up connectors.
+- **Context loops**: Always ask the agent to "check the world" at the start of a session to load persistent context before taking actions.
+- **Schema discovery first**: Have the agent call `discover-schema` before running SPARQL updates so it uses the correct predicates and types.

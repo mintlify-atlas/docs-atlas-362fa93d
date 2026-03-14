@@ -1,0 +1,227 @@
+---
+title: "Graph RAG"
+description: "Use SPARQL graph traversal to build stateful, relational retrieval-augmented generation pipelines."
+---
+
+Standard retrieval-augmented generation (RAG) often struggles with evolving facts and complex relational queries. **Graph RAG** in Worlds addresses these limitations by maintaining a stateful, structured memory in a living knowledge graph.
+
+## The limits of stateless RAG
+
+In traditional RAG, you chunk and embed text, then retrieve based on semantic similarity. This works for static corpora but fails when facts evolve or when answers depend on traversing relationships.
+
+### Scenario: the evolving fact
+
+1. **Monday:** "I am working on Project Apollo."
+2. **Wednesday:** "I am pausing Apollo to focus on Project Hermes."
+3. **Friday:** "What am I working on?"
+
+A traditional RAG system retrieves both chunks and forces the LLM to guess which is current. As your data grows, retrieval becomes increasingly noisy.
+
+## The Worlds approach: stateful graph memory
+
+Worlds maintains a **living knowledge graph**. Instead of storing raw text, it extracts meaning as **triples** — subject → predicate → object. When a fact changes, Worlds updates the specific relationship in the graph, resolving contradictions at the data layer before the LLM ever sees them.
+
+| Feature | Traditional RAG | Worlds (Graph RAG) |
+| :--- | :--- | :--- |
+| **Search** | Semantic similarity only | Hybrid: semantic + relational |
+| **State** | Stateless text chunks | Stateful knowledge graph |
+| **Inference** | LLM resolves contradictions | Resolved at data layer |
+| **Structure** | Unstructured chunks | Typed triples (subject, predicate, object) |
+| **Traceability** | Source text reference | Symbolic path through the graph |
+
+## Structuring knowledge for graph retrieval
+
+Effective graph RAG depends on modeling your domain as typed entities connected by named predicates.
+
+```turtle
+@prefix schema: <http://schema.org/> .
+@prefix ex: <http://example.com/> .
+
+# Entity definitions
+ex:ethan a schema:Person ;
+    schema:givenName "Ethan" ;
+    schema:familyName "Chen" .
+
+ex:project-hermes a schema:Project ;
+    schema:name "Project Hermes" .
+
+# Relationship fact
+ex:ethan schema:workingOn ex:project-hermes .
+```
+
+This structure lets you update `schema:workingOn` precisely when the fact changes, without touching unrelated triples.
+
+## SPARQL graph traversal patterns
+
+Once your knowledge is stored as triples, SPARQL lets you traverse the graph with precision.
+
+### Basic entity lookup
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  SELECT ?project WHERE {
+    ex:ethan schema:workingOn ?project .
+  }
+`);
+```
+
+### Multi-hop traversal
+
+Follow relationships across multiple hops to answer complex questions:
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  SELECT ?name WHERE {
+    ex:ethan schema:relatedTo ?person .
+    ?person schema:givenName ?name .
+  }
+`);
+```
+
+### Retrieving all facts about an entity
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX ex: <http://example.com/>
+
+  SELECT ?predicate ?object WHERE {
+    ex:ethan ?predicate ?object .
+  }
+`);
+```
+
+### CONSTRUCT for subgraph extraction
+
+Use CONSTRUCT to extract a subgraph as RDF for downstream processing:
+
+```typescript
+const result = await sdk.worlds.sparql("my-world", `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  CONSTRUCT {
+    ?person schema:workingOn ?project .
+    ?project schema:name ?name .
+  } WHERE {
+    ?person a schema:Person ;
+            schema:workingOn ?project .
+    ?project schema:name ?name .
+  }
+`);
+```
+
+## Implementing graph RAG: a full example
+
+The following pattern demonstrates how to feed graph-retrieved facts into an LLM:
+
+```typescript
+import { createWorldsSdk } from "@wazoo/worlds-sdk";
+
+const sdk = createWorldsSdk({
+  baseUrl: "http://localhost:8000",
+  apiKey: Deno.env.get("WORLDS_API_KEY")!,
+});
+
+async function graphRag(worldId: string, question: string, subjectIri: string) {
+  // Step 1: Retrieve facts about the subject from the graph
+  const result = await sdk.worlds.sparql(worldId, `
+    PREFIX schema: <http://schema.org/>
+
+    SELECT ?predicate ?object WHERE {
+      <${subjectIri}> ?predicate ?object .
+    }
+  `);
+
+  // Step 2: Format the triples as grounding context
+  let context = "";
+  if (result && "results" in result) {
+    for (const binding of result.results.bindings) {
+      const pred = binding.predicate.value.split("/").pop();
+      const obj = binding.object.value;
+      context += `- ${pred}: ${obj}\n`;
+    }
+  }
+
+  // Step 3: Augment the LLM prompt with graph facts
+  const prompt = `
+You are answering questions using verified facts from a knowledge graph.
+
+Facts about the subject:
+${context}
+
+Question: ${question}
+
+Answer based only on the facts above.
+  `;
+
+  return prompt;
+}
+```
+
+## Combining graph retrieval with semantic search
+
+For broader queries that don't target a specific entity, combine semantic search with graph filtering:
+
+```typescript
+// First, use semantic search to find relevant entities
+const searchResults = await sdk.worlds.search(worldId, "machine learning projects", {
+  limit: 10,
+  types: ["http://schema.org/Project"],
+});
+
+// Then, traverse the graph from those entities
+const subjects = searchResults.map((r) => r.subject);
+const values = subjects.map((s) => `<${s}>`).join(" ");
+
+const graphResult = await sdk.worlds.sparql(worldId, `
+  PREFIX schema: <http://schema.org/>
+
+  SELECT ?project ?name ?owner WHERE {
+    VALUES ?project { ${values} }
+    ?project schema:name ?name .
+    OPTIONAL { ?owner schema:workingOn ?project . }
+  }
+`);
+```
+
+<Note>
+Graph RAG requires upfront modeling effort — you must define your entity types and predicates before ingestion. See the [Knowledge Graphs guide](/guides/knowledge-graphs) for schema design patterns.
+</Note>
+
+## Updating facts
+
+When reality changes, update the specific triple rather than re-ingesting everything:
+
+```typescript
+// Remove the old assignment
+await sdk.worlds.sparql(worldId, `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  DELETE {
+    ex:ethan schema:workingOn ex:project-apollo .
+  } WHERE {
+    ex:ethan schema:workingOn ex:project-apollo .
+  }
+`);
+
+// Insert the new one
+await sdk.worlds.sparql(worldId, `
+  PREFIX schema: <http://schema.org/>
+  PREFIX ex: <http://example.com/>
+
+  INSERT DATA {
+    ex:ethan schema:workingOn ex:project-hermes .
+  }
+`);
+```
+
+<Tip>
+Use `INSERT DATA` for direct inserts when you know the exact triples. For conditional updates that depend on existing graph state, use `DELETE/INSERT WHERE` to modify the graph atomically.
+</Tip>
